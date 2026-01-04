@@ -23,7 +23,7 @@ export async function loginStudent(identifier: string): Promise<{ success: boole
 
   if (error) {
     console.error("Login error:", error);
-    return { success: false, error: "An error occurred. Please try again." };
+    return { success: false, error: error.message };
   }
 
   if (!student) {
@@ -43,7 +43,7 @@ export async function loginStudent(identifier: string): Promise<{ success: boole
 
   if (sessionError) {
     console.error("Session error:", sessionError);
-    return { success: false, error: "Failed to create session" };
+    return { success: false, error: sessionError.message };
   }
 
   const studentSession: StudentSession = {

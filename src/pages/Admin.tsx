@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 
 interface Stats {
   totalBeneficiaries: number;
@@ -32,6 +33,14 @@ interface StudentProgress {
   completed: number;
 }
 
+interface EventAnalytics {
+  event_tag: string;
+  total: number;
+  completed: number;
+  pending: number;
+  completion_rate: number;
+}
+
 export default function Admin() {
   const [authenticated, setAuthenticated] = useState(false);
   const [password, setPassword] = useState("");
@@ -42,6 +51,7 @@ export default function Admin() {
     completedAssignments: 0,
   });
   const [studentProgress, setStudentProgress] = useState<StudentProgress[]>([]);
+  const [eventAnalytics, setEventAnalytics] = useState<EventAnalytics[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -59,6 +69,7 @@ export default function Admin() {
     if (authenticated) {
       fetchStats();
       fetchStudentProgress();
+      fetchEventAnalytics();
     }
   }, [authenticated]);
 
@@ -113,6 +124,41 @@ export default function Admin() {
 
     const progress = await Promise.all(progressPromises);
     setStudentProgress(progress);
+  };
+
+  const fetchEventAnalytics = async () => {
+    try {
+      const { data: assignments } = await supabase
+        .from("assignments")
+        .select("event_tag, status");
+
+      if (!assignments) return;
+
+      // Group by event_tag
+      const eventMap = new Map<string, { total: number; completed: number }>();
+      
+      assignments.forEach((a) => {
+        const tag = a.event_tag || "Untagged";
+        if (!eventMap.has(tag)) {
+          eventMap.set(tag, { total: 0, completed: 0 });
+        }
+        const current = eventMap.get(tag)!;
+        current.total++;
+        if (a.status === "completed") current.completed++;
+      });
+
+      const analytics: EventAnalytics[] = Array.from(eventMap.entries()).map(([tag, data]) => ({
+        event_tag: tag,
+        total: data.total,
+        completed: data.completed,
+        pending: data.total - data.completed,
+        completion_rate: Math.round((data.completed / data.total) * 100),
+      }));
+
+      setEventAnalytics(analytics);
+    } catch (err) {
+      console.error("Failed to fetch event analytics", err);
+    }
   };
 
   const handleBeneficiaryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -223,6 +269,13 @@ export default function Admin() {
   };
 
   const autoAssign = async () => {
+    // Prompt for event tag
+    const eventTag = prompt("Enter event name/tag for this assignment batch (e.g., 'Zikra1447'):");
+    if (!eventTag || !eventTag.trim()) {
+      toast.error("Event tag is required");
+      return;
+    }
+
     setLoading(true);
     try {
       // Fetch all assigned beneficiary ITS IDs
@@ -265,6 +318,7 @@ export default function Admin() {
       const newAssignments = unassignedBeneficiaries.map((beneficiary, index) => ({
         beneficiary_its_id: beneficiary.its_id,
         student_tr_number: students[index % students.length].tr_number,
+        event_tag: eventTag.trim(),
       }));
 
       // Insert in batches
@@ -275,7 +329,7 @@ export default function Admin() {
         if (error) throw error;
       }
 
-      toast.success(`Assigned ${newAssignments.length} new beneficiaries (~${Math.ceil(unassignedBeneficiaries.length / students.length)} per student)`);
+      toast.success(`Assigned ${newAssignments.length} new beneficiaries for "${eventTag}" (~${Math.ceil(unassignedBeneficiaries.length / students.length)} per student)`);
       fetchStats();
       fetchStudentProgress();
     } catch (err) {
@@ -372,13 +426,17 @@ export default function Admin() {
       {/* Main Content */}
       <main className="container max-w-6xl mx-auto py-6 px-4">
         <Tabs defaultValue="data" className="space-y-6">
-          <TabsList className="grid w-full max-w-md grid-cols-3">
+          <TabsList className="grid w-full max-w-2xl grid-cols-4">
             <TabsTrigger value="data" className="gap-2">
               <Upload className="w-4 h-4" />
               Data
             </TabsTrigger>
-            <TabsTrigger value="progress" className="gap-2">
+            <TabsTrigger value="analytics" className="gap-2">
               <BarChart3 className="w-4 h-4" />
+              Analytics
+            </TabsTrigger>
+            <TabsTrigger value="progress" className="gap-2">
+              <Users className="w-4 h-4" />
               Progress
             </TabsTrigger>
             <TabsTrigger value="actions" className="gap-2">
@@ -403,6 +461,79 @@ export default function Admin() {
                 loading={loading}
               />
             </div>
+          </TabsContent>
+
+          {/* Analytics Tab */}
+          <TabsContent value="analytics" className="space-y-6">
+            {eventAnalytics.length === 0 ? (
+              <div className="card-elevated p-6">
+                <h3 className="font-serif text-xl mb-4">Event-wise Progress</h3>
+                <p className="text-sm text-muted-foreground mb-6">
+                  View completion statistics by event tags
+                </p>
+                <div className="text-center py-12 text-muted-foreground">
+                  No assignment data available yet.
+                  <br />
+                  <span className="text-xs mt-2 block">
+                    Upload beneficiaries and students, then use Auto-Assign to create assignments.
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Summary Cards */}
+                <div className="grid md:grid-cols-3 gap-4">
+                  {eventAnalytics.map((event) => (
+                    <div key={event.event_tag} className="card-elevated p-4">
+                      <h4 className="font-medium text-sm text-muted-foreground mb-2">{event.event_tag}</h4>
+                      <p className="text-2xl font-serif text-foreground">{event.completion_rate}%</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {event.completed} / {event.total} completed
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Bar Chart */}
+                <div className="card-elevated p-6">
+                  <h3 className="font-serif text-lg mb-4">Completion Overview</h3>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={eventAnalytics}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="event_tag" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="completed" fill="#22c55e" name="Completed" />
+                      <Bar dataKey="pending" fill="#ef4444" name="Pending" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Pie Chart */}
+                <div className="card-elevated p-6">
+                  <h3 className="font-serif text-lg mb-4">Distribution by Event</h3>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={eventAnalytics}
+                        dataKey="total"
+                        nameKey="event_tag"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={100}
+                        label={(entry) => `${entry.event_tag}: ${entry.total}`}
+                      >
+                        {eventAnalytics.map((_, index) => (
+                          <Cell key={`cell-${index}`} fill={['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'][index % 5]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            )}
           </TabsContent>
 
           {/* Progress Tab */}
@@ -520,6 +651,20 @@ export default function Admin() {
                   }
                 }} disabled={loading}>
                   Clear All
+                </Button>
+              </div>
+
+              <div className="card-elevated p-6">
+                <h3 className="font-serif text-lg mb-2">Refresh Stats</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Manually refresh the dashboard stats and clear cache.
+                </p>
+                <Button variant="outline" onClick={() => {
+                  fetchStats();
+                  fetchStudentProgress();
+                  toast.success("Stats refreshed");
+                }} disabled={loading}>
+                  Refresh Now
                 </Button>
               </div>
             </div>

@@ -8,6 +8,7 @@ export interface Assignment {
   beneficiary_its_id: string;
   status: "pending" | "completed";
   completed_at: string | null;
+  event_tag: string | null;
   beneficiary: {
     its_id: string;
     full_name: string;
@@ -38,6 +39,7 @@ export function useStudentAssignments() {
           beneficiary_its_id,
           status,
           completed_at,
+          event_tag,
           beneficiary:beneficiaries (
             its_id,
             full_name,

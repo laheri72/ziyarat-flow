@@ -42,7 +42,7 @@ export default function Login() {
               Rawdat Tahera Ziyarat
             </h1>
             <p className="text-muted-foreground text-sm">
-              Hadaya Amaliya • Al Jamea tus Saifiyah
+              Hadaya Amaliya • Al Jamea tus Saifiyah 
             </p>
           </div>
 
@@ -92,9 +92,17 @@ export default function Login() {
             </Button>
           </form>
 
-          {/* Footer */}
+          {/* Footer with my link to github */}
           <p className="mt-8 text-center text-xs text-muted-foreground">
-            For Talabat of Al Jamea tus Saifiyah only
+            For Talabat of Al Jamea tus Saifiyah only <br></br>
+            made by <a
+              href="https://github.com/laheri72/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline"
+            >
+              @Laheri72
+            </a>
           </p>
         </div>
       </div>

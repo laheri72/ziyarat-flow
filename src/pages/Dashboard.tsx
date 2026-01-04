@@ -217,13 +217,18 @@ function AssignmentRow({
       {/* Content */}
       <div className="flex-1 min-w-0">
         <p
-          className={`font-medium text-foreground truncate ${
+          className={`font-medium text-foreground break-words ${
             isCompleted ? "line-through text-muted-foreground" : ""
           }`}
         >
           {assignment.beneficiary.full_name}
         </p>
-        <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
+        <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground flex-wrap">
+          {assignment.event_tag && (
+            <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
+              {assignment.event_tag}
+            </span>
+          )}
           {assignment.beneficiary.age && (
             <span>{assignment.beneficiary.age} yrs</span>
           )}
