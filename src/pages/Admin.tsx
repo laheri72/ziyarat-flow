@@ -204,8 +204,8 @@ export default function Admin() {
 
       // Fetch all active students and beneficiaries
       const [studentsRes, beneficiariesRes] = await Promise.all([
-        supabase.from("students").select("tr_number").eq("is_active", true),
-        supabase.from("beneficiaries").select("its_id"),
+        supabase.from("students").select("tr_number").eq("is_active", true).limit(10000),
+        supabase.from("beneficiaries").select("its_id").limit(10000),
       ]);
 
       const students = studentsRes.data || [];
