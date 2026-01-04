@@ -124,11 +124,12 @@ export default function Admin() {
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data);
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
+      // Skip header rows by starting from row 2 (0-indexed), look for the actual data
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { range: 1 });
 
       const beneficiaries = rows.map((row) => ({
-        its_id: String(row["ITS_ID"] || row["ITS NUMBER"] || row["its_id"] || "").trim(),
-        full_name: String(row["Full_Name"] || row["NAME"] || row["full_name"] || row["Name"] || "").trim(),
+        its_id: String(row["ITS ID"] || row["ITS_ID"] || row["ITS NUMBER"] || row["its_id"] || "").trim(),
+        full_name: String(row["Full Name"] || row["Full_Name"] || row["NAME"] || row["full_name"] || row["Name"] || "").trim(),
         age: row["Age"] || row["age"] ? Number(row["Age"] || row["age"]) : null,
         gender: String(row["Gender"] || row["gender"] || "").trim() || null,
         jamaat: String(row["Jamaat"] || row["jamaat"] || row["JAMAAT"] || "").trim() || null,
