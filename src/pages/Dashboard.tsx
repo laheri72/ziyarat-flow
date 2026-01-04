@@ -293,7 +293,7 @@ function AssignmentRow({
             {hasEmail && (
               <div className="flex items-center gap-2">
                 <a
-                  href={`mailto:${assignment.beneficiary.email}?subject=Ziyarat Khidmat - Rawdat Tahera&body=Assalamu Alaikum,%0D%0A%0D%0AWe have performed Ziyarat of Rawdat Tahera (Syedna Taher Saifuddin RA & Syedna Mohammed Burhanuddin RA) on your behalf as a khidmat from HadiAshar@1449 Batch.%0D%0A%0D%0AMay Allah grant you barakaat.%0D%0A%0D%0AWasalaam`}
+                  href={`mailto:${assignment.beneficiary.email}?subject=Ziyarat Khidmat - Rawdat Tahera&body=Afzal Us Salam%0D%0A%0D%0AKem cho?%0D%0A%0D%0AHame ye Syedna Taher Saifuddin Aqa RA na Urus Mubarak na Ayyam ma aapna taraf si naam lai ne Rauzat Tahera ma bewe Moula ni zyarat kidi che.%0D%0A%0D%0AThis amal has been done as a part of khidmat from HadiAshar 1449 batch.%0D%0A%0D%0AKhuda sagla mumineen ne Rauzat Tahera ni zyarat naseeb kare.%0D%0A%0D%0AWasalaam`}
                   className="flex-1 px-3 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-700 dark:text-blue-300 rounded-md text-sm transition-colors flex items-center gap-2 font-medium"
                 >
                   <span className="text-base">✉️</span>
