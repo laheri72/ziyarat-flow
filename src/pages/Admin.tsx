@@ -135,20 +135,32 @@ export default function Admin() {
         jamaat: String(row["Jamaat"] || row["jamaat"] || row["JAMAAT"] || "").trim() || null,
         mobile: String(row["Mobile"] || row["mobile"] || row["MOBILE"] || "").trim() || null,
         email: String(row["Email"] || row["email"] || row["EMAIL"] || "").trim() || null,
-      })).filter((b) => b.its_id && b.full_name);
+      })).filter((b) => b.its_id && b.full_name)
+      // Remove duplicates based on ITS ID
+      .filter((b, index, arr) => arr.findIndex(b2 => b2.its_id === b.its_id) === index);
 
-      // Delete existing and insert new
-      await supabase.from("beneficiaries").delete().neq("its_id", "");
-      
-      // Insert in batches
+      // Fetch existing ITS IDs to avoid duplicates
+      const { data: existing } = await supabase.from("beneficiaries").select("its_id");
+      const existingIds = new Set(existing?.map(b => b.its_id) || []);
+
+      // Filter out existing beneficiaries
+      const newBeneficiaries = beneficiaries.filter(b => !existingIds.has(b.its_id));
+
+      if (newBeneficiaries.length === 0) {
+        toast.success("All beneficiaries already exist in the database");
+        fetchStats();
+        return;
+      }
+
+      // Insert only new beneficiaries
       const batchSize = 500;
-      for (let i = 0; i < beneficiaries.length; i += batchSize) {
-        const batch = beneficiaries.slice(i, i + batchSize);
+      for (let i = 0; i < newBeneficiaries.length; i += batchSize) {
+        const batch = newBeneficiaries.slice(i, i + batchSize);
         const { error } = await supabase.from("beneficiaries").insert(batch);
         if (error) throw error;
       }
 
-      toast.success(`Imported ${beneficiaries.length} beneficiaries`);
+      toast.success(`Added ${newBeneficiaries.length} new beneficiaries (${beneficiaries.length - newBeneficiaries.length} already existed)`);
       fetchStats();
     } catch (err) {
       console.error(err);
@@ -176,15 +188,29 @@ export default function Admin() {
         name: String(row["NAME"] || row["Name"] || row["name"] || "").trim(),
         branch: String(row["BRANCH"] || row["Branch"] || row["branch"] || "").trim() || null,
         email: String(row["EMAIL"] || row["Email"] || row["email"] || "").trim() || null,
-      })).filter((s) => s.tr_number && s.its_id && s.name);
+      })).filter((s) => s.tr_number && s.its_id && s.name)
+      // Remove duplicates based on TR Number
+      .filter((s, index, arr) => arr.findIndex(s2 => s2.tr_number === s.tr_number) === index);
 
-      // Delete existing and insert new
-      await supabase.from("students").delete().neq("tr_number", "");
+      // Fetch existing TR Numbers to avoid duplicates
+      const { data: existing } = await supabase.from("students").select("tr_number");
+      const existingTrs = new Set(existing?.map(s => s.tr_number) || []);
 
-      const { error } = await supabase.from("students").insert(students);
+      // Filter out existing students
+      const newStudents = students.filter(s => !existingTrs.has(s.tr_number));
+
+      if (newStudents.length === 0) {
+        toast.success("All students already exist in the database");
+        fetchStats();
+        fetchStudentProgress();
+        return;
+      }
+
+      // Insert only new students
+      const { error } = await supabase.from("students").insert(newStudents);
       if (error) throw error;
 
-      toast.success(`Imported ${students.length} students`);
+      toast.success(`Added ${newStudents.length} new students (${students.length - newStudents.length} already existed)`);
       fetchStats();
       fetchStudentProgress();
     } catch (err) {
@@ -199,38 +225,57 @@ export default function Admin() {
   const autoAssign = async () => {
     setLoading(true);
     try {
-      // Clear existing assignments
-      await supabase.from("assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      // Fetch all assigned beneficiary ITS IDs
+      const { data: assignments } = await supabase.from("assignments").select("beneficiary_its_id");
+      const assignedSet = new Set(assignments?.map(a => a.beneficiary_its_id) || []);
 
-      // Fetch all active students and beneficiaries
-      const [studentsRes, beneficiariesRes] = await Promise.all([
-        supabase.from("students").select("tr_number").eq("is_active", true).limit(10000),
-        supabase.from("beneficiaries").select("its_id").limit(10000),
-      ]);
+      // Fetch all active students
+      const { data: students } = await supabase.from("students").select("tr_number").eq("is_active", true);
 
-      const students = studentsRes.data || [];
-      const beneficiaries = beneficiariesRes.data || [];
+      // Fetch all beneficiaries using pagination
+      const allBeneficiaries = [];
+      let offset = 0;
+      const batchSize = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("beneficiaries")
+          .select("its_id")
+          .order('its_id')
+          .range(offset, offset + batchSize - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allBeneficiaries.push(...data);
+        offset += batchSize;
+      }
 
-      if (students.length === 0 || beneficiaries.length === 0) {
-        toast.error("No students or beneficiaries to assign");
+      // Filter to only unassigned beneficiaries
+      const unassignedBeneficiaries = allBeneficiaries.filter(b => !assignedSet.has(b.its_id));
+
+      if (students.length === 0) {
+        toast.error("No active students available");
         return;
       }
 
-      // Distribute beneficiaries among students
-      const assignments = beneficiaries.map((beneficiary, index) => ({
+      if (unassignedBeneficiaries.length === 0) {
+        toast.success("All beneficiaries are already assigned");
+        return;
+      }
+
+      // Distribute unassigned beneficiaries among students
+      const newAssignments = unassignedBeneficiaries.map((beneficiary, index) => ({
         beneficiary_its_id: beneficiary.its_id,
         student_tr_number: students[index % students.length].tr_number,
       }));
 
       // Insert in batches
-      const batchSize = 500;
-      for (let i = 0; i < assignments.length; i += batchSize) {
-        const batch = assignments.slice(i, i + batchSize);
+      const insertBatchSize = 500;
+      for (let i = 0; i < newAssignments.length; i += insertBatchSize) {
+        const batch = newAssignments.slice(i, i + insertBatchSize);
         const { error } = await supabase.from("assignments").insert(batch);
         if (error) throw error;
       }
 
-      toast.success(`Created ${assignments.length} assignments (~${Math.ceil(beneficiaries.length / students.length)} per student)`);
+      toast.success(`Assigned ${newAssignments.length} new beneficiaries (~${Math.ceil(unassignedBeneficiaries.length / students.length)} per student)`);
       fetchStats();
       fetchStudentProgress();
     } catch (err) {
@@ -432,14 +477,14 @@ export default function Admin() {
 
           {/* Actions Tab */}
           <TabsContent value="actions" className="space-y-6">
-            <div className="grid md:grid-cols-2 gap-6">
+            <div className="grid md:grid-cols-3 gap-6">
               <div className="card-elevated p-6">
                 <h3 className="font-serif text-lg mb-2">Auto-Assign Beneficiaries</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Distribute all beneficiaries equally among active students.
-                  This will clear existing assignments.
+                  Assign unassigned beneficiaries equally among active students.
+                  Button is disabled when all beneficiaries are already assigned.
                 </p>
-                <Button onClick={autoAssign} disabled={loading}>
+                <Button onClick={autoAssign} disabled={loading || stats.totalAssignments >= stats.totalBeneficiaries}>
                   {loading ? (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   ) : (
@@ -457,6 +502,24 @@ export default function Admin() {
                 <Button variant="outline" onClick={exportReport}>
                   <Download className="w-4 h-4 mr-2" />
                   Download Report
+                </Button>
+              </div>
+
+              <div className="card-elevated p-6">
+                <h3 className="font-serif text-lg mb-2">Clear All Beneficiaries</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Remove all beneficiaries from the database. Use with caution.
+                </p>
+                <Button variant="destructive" onClick={async () => {
+                  if (confirm('Are you sure you want to delete all beneficiaries?')) {
+                    setLoading(true);
+                    await supabase.from("beneficiaries").delete().neq("its_id", "");
+                    toast.success("All beneficiaries cleared");
+                    fetchStats();
+                    setLoading(false);
+                  }
+                }} disabled={loading}>
+                  Clear All
                 </Button>
               </div>
             </div>
