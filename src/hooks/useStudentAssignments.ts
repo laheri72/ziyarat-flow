@@ -15,6 +15,8 @@ export interface Assignment {
     age: number | null;
     gender: string | null;
     jamaat: string | null;
+    email: string | null;
+    mobile: string | null;
   };
 }
 
@@ -45,7 +47,9 @@ export function useStudentAssignments() {
             full_name,
             age,
             gender,
-            jamaat
+            jamaat,
+            email,
+            mobile
           )
         `)
         .eq("student_tr_number", session.tr_number)

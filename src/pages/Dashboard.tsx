@@ -198,53 +198,121 @@ function AssignmentRow({
   onToggle: (id: string, status: "pending" | "completed") => void;
 }) {
   const isCompleted = assignment.status === "completed";
+  const hasEmail = assignment.beneficiary.email;
+  const hasMobile = assignment.beneficiary.mobile;
+  const hasContact = isCompleted && (hasEmail || hasMobile);
+
+  const copyContact = (text: string, type: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success(`${type} copied!`);
+  };
+
+  // Format mobile number for WhatsApp (remove + and spaces)
+  const getWhatsAppLink = (mobile: string) => {
+    const cleanNumber = mobile.replace(/[^0-9]/g, '');
+    const message = encodeURIComponent(
+      `Afzal Us Salam\n\nKem cho?\n\nHame ye Syedna Taher Saifuddin Aqa RA na Urus Mubarak na Ayyam ma aapna taraf si naam lai ne Rauzat Tahera ma bewe Moula ni zyarat kidi che.\n\nThis amal has been done as a part of khidmat from HadiAshar 1449 batch.\n\nKhuda sagla mumineen ne Rauzat Tahera ni zyarat naseeb kare.\n\nWasalaam`
+    );
+    return `https://wa.me/${cleanNumber}?text=${message}`;
+  };
 
   return (
-    <div
-      className={`card-elevated p-4 flex items-center gap-4 transition-all duration-200 table-row-hover ${
-        isCompleted ? "opacity-60" : ""
-      }`}
-    >
-      {/* Checkbox */}
-      <button
-        onClick={() => onToggle(assignment.id, assignment.status)}
-        className={`ziyarat-checkbox ${isCompleted ? "checked" : ""}`}
-        aria-label={isCompleted ? "Mark as pending" : "Mark as completed"}
-      >
-        {isCompleted && <Check className="w-3.5 h-3.5 text-success-foreground" />}
-      </button>
-
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        <p
-          className={`font-medium text-foreground break-words ${
-            isCompleted ? "line-through text-muted-foreground" : ""
-          }`}
+    <div className="card-elevated p-4 transition-all duration-200">
+      <div className={`flex items-center gap-4 ${isCompleted ? "opacity-60" : ""}`}>
+        {/* Checkbox */}
+        <button
+          onClick={() => onToggle(assignment.id, assignment.status)}
+          className={`ziyarat-checkbox ${isCompleted ? "checked" : ""}`}
+          aria-label={isCompleted ? "Mark as pending" : "Mark as completed"}
         >
-          {assignment.beneficiary.full_name}
-        </p>
-        <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground flex-wrap">
-          {assignment.event_tag && (
-            <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
-              {assignment.event_tag}
-            </span>
-          )}
-          {assignment.beneficiary.age && (
-            <span>{assignment.beneficiary.age} yrs</span>
-          )}
-          {assignment.beneficiary.gender && (
-            <span>{assignment.beneficiary.gender}</span>
-          )}
-          {assignment.beneficiary.jamaat && (
-            <span className="truncate">{assignment.beneficiary.jamaat}</span>
-          )}
+          {isCompleted && <Check className="w-3.5 h-3.5 text-success-foreground" />}
+        </button>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <p
+            className={`font-medium text-foreground break-words ${
+              isCompleted ? "line-through text-muted-foreground" : ""
+            }`}
+          >
+            {assignment.beneficiary.full_name}
+          </p>
+          <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground flex-wrap">
+            {assignment.event_tag && (
+              <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
+                {assignment.event_tag}
+              </span>
+            )}
+            {assignment.beneficiary.age && (
+              <span>{assignment.beneficiary.age} yrs</span>
+            )}
+            {assignment.beneficiary.gender && (
+              <span>{assignment.beneficiary.gender}</span>
+            )}
+            {assignment.beneficiary.jamaat && (
+              <span className="truncate">{assignment.beneficiary.jamaat}</span>
+            )}
+          </div>
         </div>
+
+        {/* Status Badge */}
+        <span className={isCompleted ? "badge-completed" : "badge-pending"}>
+          {isCompleted ? "Done" : "Pending"}
+        </span>
       </div>
 
-      {/* Status Badge */}
-      <span className={isCompleted ? "badge-completed" : "badge-pending"}>
-        {isCompleted ? "Done" : "Pending"}
-      </span>
+      {/* Contact Details - Show when completed (NOT greyed out) */}
+      {hasContact && (
+        <div className="mt-3 pt-3 border-t border-border space-y-2">
+          <p className="text-xs font-medium text-foreground mb-2">
+            📞 Contact to inform about Ziyarat:
+          </p>
+          <div className="flex flex-col gap-2">
+            {hasMobile && (
+              <div className="flex items-center gap-2">
+                <a
+                  href={getWhatsAppLink(assignment.beneficiary.mobile!)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 px-3 py-2 bg-green-500/10 hover:bg-green-500/20 text-green-700 dark:text-green-300 rounded-md text-sm transition-colors flex items-center gap-2 font-medium"
+                >
+                  <span className="text-base">💬</span>
+                  <span className="flex-1 truncate">{assignment.beneficiary.mobile}</span>
+                  <span className="text-xs opacity-70">WhatsApp</span>
+                </a>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9"
+                  onClick={() => copyContact(assignment.beneficiary.mobile!, "Mobile")}
+                >
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
+            )}
+            {hasEmail && (
+              <div className="flex items-center gap-2">
+                <a
+                  href={`mailto:${assignment.beneficiary.email}?subject=Ziyarat Khidmat - Rawdat Tahera&body=Assalamu Alaikum,%0D%0A%0D%0AWe have performed Ziyarat of Rawdat Tahera (Syedna Taher Saifuddin RA & Syedna Mohammed Burhanuddin RA) on your behalf as a khidmat from HadiAshar@1449 Batch.%0D%0A%0D%0AMay Allah grant you barakaat.%0D%0A%0D%0AWasalaam`}
+                  className="flex-1 px-3 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-700 dark:text-blue-300 rounded-md text-sm transition-colors flex items-center gap-2 font-medium"
+                >
+                  <span className="text-base">✉️</span>
+                  <span className="flex-1 truncate">{assignment.beneficiary.email}</span>
+                  <span className="text-xs opacity-70">Email</span>
+                </a>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9"
+                  onClick={() => copyContact(assignment.beneficiary.email!, "Email")}
+                >
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

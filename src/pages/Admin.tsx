@@ -54,6 +54,16 @@ export default function Admin() {
   const [eventAnalytics, setEventAnalytics] = useState<EventAnalytics[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedEvent, setSelectedEvent] = useState<string>("");
+  const [sortBy, setSortBy] = useState<"name" | "branch" | "assigned" | "completed" | "progress">("name");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  const [newStudent, setNewStudent] = useState({
+    tr_number: "",
+    its_id: "",
+    name: "",
+    branch: "",
+    email: "",
+  });
 
   // Simple password check (in production, use proper auth)
   const handleLogin = () => {
@@ -128,16 +138,38 @@ export default function Admin() {
 
   const fetchEventAnalytics = async () => {
     try {
-      const { data: assignments } = await supabase
-        .from("assignments")
-        .select("event_tag, status");
+      // Fetch ALL assignments with pagination
+      const allAssignments = [];
+      let offset = 0;
+      const batchSize = 1000;
+      
+      console.log("📊 Fetching all assignments for analytics...");
+      while (true) {
+        const { data, error } = await supabase
+          .from("assignments")
+          .select("event_tag, status")
+          .order('id')
+          .range(offset, offset + batchSize - 1);
+        
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        allAssignments.push(...data);
+        offset += batchSize;
+        console.log(`📊 Loaded ${allAssignments.length} assignments...`);
+      }
 
-      if (!assignments) return;
+      console.log(`📊 Total assignments loaded: ${allAssignments.length}`);
+
+      if (allAssignments.length === 0) {
+        setEventAnalytics([]);
+        return;
+      }
 
       // Group by event_tag
       const eventMap = new Map<string, { total: number; completed: number }>();
       
-      assignments.forEach((a) => {
+      allAssignments.forEach((a) => {
         const tag = a.event_tag || "Untagged";
         if (!eventMap.has(tag)) {
           eventMap.set(tag, { total: 0, completed: 0 });
@@ -155,6 +187,7 @@ export default function Admin() {
         completion_rate: Math.round((data.completed / data.total) * 100),
       }));
 
+      console.log("📊 Event analytics:", analytics);
       setEventAnalytics(analytics);
     } catch (err) {
       console.error("Failed to fetch event analytics", err);
@@ -173,27 +206,49 @@ export default function Admin() {
       // Skip header rows by starting from row 2 (0-indexed), look for the actual data
       const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { range: 1 });
 
-      const beneficiaries = rows.map((row) => ({
-        its_id: String(row["ITS ID"] || row["ITS_ID"] || row["ITS NUMBER"] || row["its_id"] || "").trim(),
-        full_name: String(row["Full Name"] || row["Full_Name"] || row["NAME"] || row["full_name"] || row["Name"] || "").trim(),
-        age: row["Age"] || row["age"] ? Number(row["Age"] || row["age"]) : null,
-        gender: String(row["Gender"] || row["gender"] || "").trim() || null,
-        jamaat: String(row["Jamaat"] || row["jamaat"] || row["JAMAAT"] || "").trim() || null,
-        mobile: String(row["Mobile"] || row["mobile"] || row["MOBILE"] || "").trim() || null,
-        email: String(row["Email"] || row["email"] || row["EMAIL"] || "").trim() || null,
-      })).filter((b) => b.its_id && b.full_name)
+      console.log("📄 Raw Excel rows:", rows);
+
+      const beneficiaries = rows.map((row) => {
+        const itsId = String(row["ITS ID"] || row["ITS_ID"] || row["ITS NUMBER"] || row["its_id"] || "").trim();
+        const fullName = String(row["Full Name"] || row["Full_Name"] || row["NAME"] || row["full_name"] || row["Name"] || "").trim();
+        console.log(`🔍 Row: ITS="${itsId}" (type: ${typeof itsId}), Name="${fullName}"`);
+        return {
+          its_id: itsId,
+          full_name: fullName,
+          age: row["Age"] || row["age"] ? Number(row["Age"] || row["age"]) : null,
+          gender: String(row["Gender"] || row["gender"] || "").trim() || null,
+          jamaat: String(row["Jamaat"] || row["jamaat"] || row["JAMAAT"] || "").trim() || null,
+          mobile: String(row["Mobile"] || row["mobile"] || row["MOBILE"] || "").trim() || null,
+          email: String(row["Email"] || row["email"] || row["EMAIL"] || "").trim() || null,
+        };
+      }).filter((b) => b.its_id && b.full_name)
       // Remove duplicates based on ITS ID
       .filter((b, index, arr) => arr.findIndex(b2 => b2.its_id === b.its_id) === index);
+
+      console.log("✅ Parsed beneficiaries:", beneficiaries);
 
       // Fetch existing ITS IDs to avoid duplicates
       const { data: existing } = await supabase.from("beneficiaries").select("its_id");
       const existingIds = new Set(existing?.map(b => b.its_id) || []);
 
+      console.log(`💾 Database has ${existingIds.size} existing ITS IDs`);
+      console.log("Sample from DB:", Array.from(existingIds).slice(0, 5));
+
       // Filter out existing beneficiaries
-      const newBeneficiaries = beneficiaries.filter(b => !existingIds.has(b.its_id));
+      const newBeneficiaries = beneficiaries.filter(b => {
+        const exists = existingIds.has(b.its_id);
+        if (exists) {
+          console.log(`❌ DUPLICATE: "${b.its_id}" already exists in database`);
+        } else {
+          console.log(`✅ NEW: "${b.its_id}" will be inserted`);
+        }
+        return !exists;
+      });
+
+      console.log(`📊 Summary: ${newBeneficiaries.length} new, ${beneficiaries.length - newBeneficiaries.length} duplicates`);
 
       if (newBeneficiaries.length === 0) {
-        toast.success("All beneficiaries already exist in the database");
+        toast.error(`All ${beneficiaries.length} beneficiaries already exist in the database`);
         fetchStats();
         return;
       }
@@ -268,6 +323,72 @@ export default function Admin() {
     }
   };
 
+  const handleAddStudent = async () => {
+    // Validate required fields
+    if (!newStudent.tr_number.trim() || !newStudent.its_id.trim() || !newStudent.name.trim()) {
+      toast.error("TR Number, ITS ID, and Name are required");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Check if TR number or ITS ID already exists
+      const { data: existingByTr } = await supabase
+        .from("students")
+        .select("tr_number, name")
+        .eq("tr_number", newStudent.tr_number.trim())
+        .maybeSingle();
+
+      const { data: existingByIts } = await supabase
+        .from("students")
+        .select("its_id, name")
+        .eq("its_id", newStudent.its_id.trim())
+        .maybeSingle();
+
+      if (existingByTr) {
+        toast.error(`TR Number ${newStudent.tr_number} already exists for student: ${existingByTr.name}`);
+        setLoading(false);
+        return;
+      }
+
+      if (existingByIts) {
+        toast.error(`ITS ID ${newStudent.its_id} already exists for student: ${existingByIts.name}`);
+        setLoading(false);
+        return;
+      }
+
+      // Insert new student
+      const { error } = await supabase.from("students").insert({
+        tr_number: newStudent.tr_number.trim(),
+        its_id: newStudent.its_id.trim(),
+        name: newStudent.name.trim(),
+        branch: newStudent.branch.trim() || null,
+        email: newStudent.email.trim() || null,
+      });
+
+      if (error) throw error;
+
+      toast.success(`Added student: ${newStudent.name}`);
+      
+      // Reset form
+      setNewStudent({
+        tr_number: "",
+        its_id: "",
+        name: "",
+        branch: "",
+        email: "",
+      });
+
+      fetchStats();
+      fetchStudentProgress();
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to add student");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const autoAssign = async () => {
     // Prompt for event tag
     const eventTag = prompt("Enter event name/tag for this assignment batch (e.g., 'Zikra1447'):");
@@ -278,63 +399,109 @@ export default function Admin() {
 
     setLoading(true);
     try {
-      // Fetch all assigned beneficiary ITS IDs
-      const { data: assignments } = await supabase.from("assignments").select("beneficiary_its_id");
-      const assignedSet = new Set(assignments?.map(a => a.beneficiary_its_id) || []);
-
+      console.log("🚀 Starting auto-assign...");
+      
       // Fetch all active students
-      const { data: students } = await supabase.from("students").select("tr_number").eq("is_active", true);
+      const { data: students, error: studError } = await supabase
+        .from("students")
+        .select("tr_number")
+        .eq("is_active", true);
+      
+      if (studError) throw studError;
 
-      // Fetch all beneficiaries using pagination
+      if (!students || students.length === 0) {
+        toast.error("No active students available");
+        setLoading(false);
+        return;
+      }
+      console.log(`👥 Found ${students.length} active students`);
+
+      // Fetch ALL beneficiaries with pagination
       const allBeneficiaries = [];
       let offset = 0;
-      const batchSize = 1000;
+      const fetchBatchSize = 1000;
+      
+      console.log("📥 Fetching all beneficiaries...");
       while (true) {
         const { data, error } = await supabase
           .from("beneficiaries")
           .select("its_id")
           .order('its_id')
-          .range(offset, offset + batchSize - 1);
+          .range(offset, offset + fetchBatchSize - 1);
+        
         if (error) throw error;
         if (!data || data.length === 0) break;
+        
         allBeneficiaries.push(...data);
-        offset += batchSize;
+        offset += fetchBatchSize;
+        console.log(`📥 Loaded ${allBeneficiaries.length} beneficiaries...`);
       }
 
-      // Filter to only unassigned beneficiaries
+      // Fetch ALL assignments with pagination
+      const allAssignments = [];
+      offset = 0;
+      
+      console.log("📥 Fetching all assignments...");
+      while (true) {
+        const { data, error } = await supabase
+          .from("assignments")
+          .select("beneficiary_its_id")
+          .order('beneficiary_its_id')
+          .range(offset, offset + fetchBatchSize - 1);
+        
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        allAssignments.push(...data);
+        offset += fetchBatchSize;
+        console.log(`📥 Loaded ${allAssignments.length} assignments...`);
+      }
+
+      // Create a Set of assigned ITS IDs for fast lookup
+      const assignedSet = new Set(allAssignments.map(a => a.beneficiary_its_id));
+      
+      // Filter to get only unassigned beneficiaries
       const unassignedBeneficiaries = allBeneficiaries.filter(b => !assignedSet.has(b.its_id));
-
-      if (students.length === 0) {
-        toast.error("No active students available");
-        return;
-      }
+      
+      console.log(`👤 Total beneficiaries: ${allBeneficiaries.length}`);
+      console.log(`📋 Already assigned: ${assignedSet.size}`);
+      console.log(`✅ Unassigned beneficiaries: ${unassignedBeneficiaries.length}`);
 
       if (unassignedBeneficiaries.length === 0) {
         toast.success("All beneficiaries are already assigned");
+        setLoading(false);
         return;
       }
 
-      // Distribute unassigned beneficiaries among students
+      // Distribute unassigned beneficiaries evenly among students
       const newAssignments = unassignedBeneficiaries.map((beneficiary, index) => ({
         beneficiary_its_id: beneficiary.its_id,
         student_tr_number: students[index % students.length].tr_number,
         event_tag: eventTag.trim(),
       }));
 
+      console.log(`📦 Inserting ${newAssignments.length} new assignments...`);
+
       // Insert in batches
       const insertBatchSize = 500;
       for (let i = 0; i < newAssignments.length; i += insertBatchSize) {
         const batch = newAssignments.slice(i, i + insertBatchSize);
         const { error } = await supabase.from("assignments").insert(batch);
-        if (error) throw error;
+        if (error) {
+          console.error(`❌ Error at batch ${i}:`, error);
+          throw error;
+        }
+        console.log(`✅ Inserted batch ${Math.floor(i / insertBatchSize) + 1}/${Math.ceil(newAssignments.length / insertBatchSize)}`);
       }
 
+      console.log(`✅ Successfully assigned ${newAssignments.length} beneficiaries`);
       toast.success(`Assigned ${newAssignments.length} new beneficiaries for "${eventTag}" (~${Math.ceil(unassignedBeneficiaries.length / students.length)} per student)`);
       fetchStats();
       fetchStudentProgress();
+      fetchEventAnalytics();
     } catch (err) {
-      console.error(err);
-      toast.error("Failed to auto-assign");
+      console.error("❌ Auto-assign error:", err);
+      toast.error(`Failed to auto-assign: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -359,15 +526,59 @@ export default function Admin() {
     toast.success("Report downloaded");
   };
 
-  const filteredProgress = studentProgress.filter((s) => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      s.name.toLowerCase().includes(query) ||
-      s.tr_number.toLowerCase().includes(query) ||
-      s.branch.toLowerCase().includes(query)
-    );
-  });
+  const handleSort = (column: "name" | "branch" | "assigned" | "completed" | "progress") => {
+    if (sortBy === column) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(column);
+      setSortOrder("asc");
+    }
+  };
+
+  const filteredProgress = studentProgress
+    .filter((s) => {
+      if (!searchQuery) return true;
+      const query = searchQuery.toLowerCase();
+      return (
+        s.name.toLowerCase().includes(query) ||
+        s.tr_number.toLowerCase().includes(query) ||
+        s.branch.toLowerCase().includes(query)
+      );
+    })
+    .sort((a, b) => {
+      let aValue: string | number;
+      let bValue: string | number;
+
+      switch (sortBy) {
+        case "name":
+          aValue = a.name.toLowerCase();
+          bValue = b.name.toLowerCase();
+          break;
+        case "branch":
+          aValue = a.branch.toLowerCase();
+          bValue = b.branch.toLowerCase();
+          break;
+        case "assigned":
+          aValue = a.assigned;
+          bValue = b.assigned;
+          break;
+        case "completed":
+          aValue = a.completed;
+          bValue = b.completed;
+          break;
+        case "progress":
+          aValue = a.assigned > 0 ? (a.completed / a.assigned) * 100 : 0;
+          bValue = b.assigned > 0 ? (b.completed / b.assigned) * 100 : 0;
+          break;
+        default:
+          aValue = 0;
+          bValue = 0;
+      }
+
+      if (aValue < bValue) return sortOrder === "asc" ? -1 : 1;
+      if (aValue > bValue) return sortOrder === "asc" ? 1 : -1;
+      return 0;
+    });
 
   if (!authenticated) {
     return (
@@ -460,6 +671,115 @@ export default function Admin() {
                 onUpload={handleStudentUpload}
                 loading={loading}
               />
+            </div>
+
+            {/* Manual Student Entry */}
+            <div className="card-elevated p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <Users className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-serif text-lg">Add Student Manually</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Quick add individual students without Excel import
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-foreground mb-1 block">
+                    TR Number <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    placeholder="e.g., 25687"
+                    value={newStudent.tr_number}
+                    onChange={(e) => setNewStudent({ ...newStudent, tr_number: e.target.value })}
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-foreground mb-1 block">
+                    ITS Number <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    placeholder="e.g., 40401849"
+                    value={newStudent.its_id}
+                    onChange={(e) => setNewStudent({ ...newStudent, its_id: e.target.value })}
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-foreground mb-1 block">
+                    Name <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    placeholder="Full name"
+                    value={newStudent.name}
+                    onChange={(e) => setNewStudent({ ...newStudent, name: e.target.value })}
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-foreground mb-1 block">
+                    Branch
+                  </label>
+                  <select
+                    value={newStudent.branch}
+                    onChange={(e) => setNewStudent({ ...newStudent, branch: e.target.value })}
+                    disabled={loading}
+                    className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm"
+                  >
+                    <option value="">Select branch...</option>
+                    <option value="Marol">MAROL</option>
+                    <option value="SURAT">SURAT</option>
+                    <option value="NAIROBI">NAIROBI</option>
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="text-sm font-medium text-foreground mb-1 block">
+                    Email
+                  </label>
+                  <Input
+                    type="email"
+                    placeholder="25687@jameasaifiyah.edu"
+                    value={newStudent.email}
+                    onChange={(e) => setNewStudent({ ...newStudent, email: e.target.value })}
+                    disabled={loading}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 flex gap-3">
+                <Button onClick={handleAddStudent} disabled={loading}>
+                  {loading ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Users className="w-4 h-4 mr-2" />
+                  )}
+                  Add Student
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    setNewStudent({
+                      tr_number: "",
+                      its_id: "",
+                      name: "",
+                      branch: "",
+                      email: "",
+                    })
+                  }
+                  disabled={loading}
+                >
+                  Clear Form
+                </Button>
+              </div>
             </div>
           </TabsContent>
 
@@ -562,11 +882,61 @@ export default function Admin() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/50">
-                      <th className="text-left py-3 px-4 font-medium">Student</th>
-                      <th className="text-left py-3 px-4 font-medium">Branch</th>
-                      <th className="text-center py-3 px-4 font-medium">Assigned</th>
-                      <th className="text-center py-3 px-4 font-medium">Completed</th>
-                      <th className="text-center py-3 px-4 font-medium">Progress</th>
+                      <th 
+                        className="text-left py-3 px-4 font-medium cursor-pointer hover:bg-muted transition-colors"
+                        onClick={() => handleSort("name")}
+                      >
+                        <div className="flex items-center gap-2">
+                          Student
+                          {sortBy === "name" && (
+                            <span className="text-xs">{sortOrder === "asc" ? "↑" : "↓"}</span>
+                          )}
+                        </div>
+                      </th>
+                      <th 
+                        className="text-left py-3 px-4 font-medium cursor-pointer hover:bg-muted transition-colors"
+                        onClick={() => handleSort("branch")}
+                      >
+                        <div className="flex items-center gap-2">
+                          Branch
+                          {sortBy === "branch" && (
+                            <span className="text-xs">{sortOrder === "asc" ? "↑" : "↓"}</span>
+                          )}
+                        </div>
+                      </th>
+                      <th 
+                        className="text-center py-3 px-4 font-medium cursor-pointer hover:bg-muted transition-colors"
+                        onClick={() => handleSort("assigned")}
+                      >
+                        <div className="flex items-center justify-center gap-2">
+                          Assigned
+                          {sortBy === "assigned" && (
+                            <span className="text-xs">{sortOrder === "asc" ? "↑" : "↓"}</span>
+                          )}
+                        </div>
+                      </th>
+                      <th 
+                        className="text-center py-3 px-4 font-medium cursor-pointer hover:bg-muted transition-colors"
+                        onClick={() => handleSort("completed")}
+                      >
+                        <div className="flex items-center justify-center gap-2">
+                          Completed
+                          {sortBy === "completed" && (
+                            <span className="text-xs">{sortOrder === "asc" ? "↑" : "↓"}</span>
+                          )}
+                        </div>
+                      </th>
+                      <th 
+                        className="text-center py-3 px-4 font-medium cursor-pointer hover:bg-muted transition-colors"
+                        onClick={() => handleSort("progress")}
+                      >
+                        <div className="flex items-center justify-center gap-2">
+                          Progress
+                          {sortBy === "progress" && (
+                            <span className="text-xs">{sortOrder === "asc" ? "↑" : "↓"}</span>
+                          )}
+                        </div>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -637,20 +1007,86 @@ export default function Admin() {
               </div>
 
               <div className="card-elevated p-6">
-                <h3 className="font-serif text-lg mb-2">Clear All Beneficiaries</h3>
+                <h3 className="font-serif text-lg mb-2">Delete Beneficiaries by Event</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Remove all beneficiaries from the database. Use with caution.
+                  Permanently delete beneficiaries and assignments for a specific event.
                 </p>
-                <Button variant="destructive" onClick={async () => {
-                  if (confirm('Are you sure you want to delete all beneficiaries?')) {
-                    setLoading(true);
-                    await supabase.from("beneficiaries").delete().neq("its_id", "");
-                    toast.success("All beneficiaries cleared");
-                    fetchStats();
-                    setLoading(false);
-                  }
-                }} disabled={loading}>
-                  Clear All
+                <select
+                  value={selectedEvent}
+                  onChange={(e) => setSelectedEvent(e.target.value)}
+                  className="w-full mb-3 px-3 py-2 border border-input rounded-md bg-background text-sm"
+                  disabled={loading || eventAnalytics.length === 0}
+                >
+                  <option value="">Select an event...</option>
+                  {eventAnalytics.map((event) => (
+                    <option key={event.event_tag} value={event.event_tag}>
+                      {event.event_tag} ({event.total} beneficiaries)
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  variant="destructive"
+                  onClick={async () => {
+                    if (!selectedEvent) {
+                      toast.error("Please select an event");
+                      return;
+                    }
+                    if (confirm(`⚠️ PERMANENTLY DELETE all beneficiaries for "${selectedEvent}"?\n\nThis will delete:\n- ${eventAnalytics.find(e => e.event_tag === selectedEvent)?.total || 0} beneficiaries\n- All their assignments\n\nThis action CANNOT be undone!`)) {
+                      setLoading(true);
+                      try {
+                        // First, get all beneficiary ITS IDs for this event
+                        const { data: assignments, error: fetchError } = await supabase
+                          .from("assignments")
+                          .select("beneficiary_its_id")
+                          .eq("event_tag", selectedEvent);
+                        
+                        if (fetchError) throw fetchError;
+                        
+                        const beneficiaryIds = assignments?.map(a => a.beneficiary_its_id) || [];
+                        
+                        if (beneficiaryIds.length === 0) {
+                          toast.error("No beneficiaries found for this event");
+                          setLoading(false);
+                          return;
+                        }
+
+                        console.log(`🗑️ Deleting ${beneficiaryIds.length} beneficiaries for "${selectedEvent}"`);
+
+                        // Delete assignments first (foreign key constraint)
+                        const { error: assignError } = await supabase
+                          .from("assignments")
+                          .delete()
+                          .eq("event_tag", selectedEvent);
+                        
+                        if (assignError) throw assignError;
+
+                        // Then delete beneficiaries in batches
+                        const batchSize = 500;
+                        for (let i = 0; i < beneficiaryIds.length; i += batchSize) {
+                          const batch = beneficiaryIds.slice(i, i + batchSize);
+                          const { error } = await supabase
+                            .from("beneficiaries")
+                            .delete()
+                            .in("its_id", batch);
+                          if (error) throw error;
+                        }
+
+                        toast.success(`Deleted ${beneficiaryIds.length} beneficiaries for "${selectedEvent}"`);
+                        setSelectedEvent("");
+                        fetchStats();
+                        fetchStudentProgress();
+                        fetchEventAnalytics();
+                      } catch (err) {
+                        console.error(err);
+                        toast.error("Failed to delete beneficiaries");
+                      } finally {
+                        setLoading(false);
+                      }
+                    }
+                  }}
+                  disabled={loading || !selectedEvent}
+                >
+                  Delete Beneficiaries & Assignments
                 </Button>
               </div>
 
