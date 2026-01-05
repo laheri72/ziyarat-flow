@@ -13,6 +13,7 @@ import {
   Loader2,
   Search,
   RefreshCw,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
@@ -64,6 +65,10 @@ export default function Admin() {
     branch: "",
     email: "",
   });
+  const [showManualAssign, setShowManualAssign] = useState(false);
+  const [availableStudents, setAvailableStudents] = useState<Array<{ tr_number: string; name: string; branch: string; available_in_mumbai: boolean }>>([]);
+  const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set());
+  const [currentEventForAssign, setCurrentEventForAssign] = useState("");
 
   // Simple password check (in production, use proper auth)
   const handleLogin = () => {
@@ -80,8 +85,21 @@ export default function Admin() {
       fetchStats();
       fetchStudentProgress();
       fetchEventAnalytics();
+      fetchCurrentEventSetting();
     }
   }, [authenticated]);
+
+  const fetchCurrentEventSetting = async () => {
+    const { data } = await supabase
+      .from("app_settings")
+      .select("setting_value")
+      .eq("setting_key", "current_event_for_availability")
+      .single();
+    
+    if (data) {
+      setCurrentEventForAssign(data.setting_value || "");
+    }
+  };
 
   const fetchStats = async () => {
     const [beneficiaries, students, assignments, completed] = await Promise.all([
@@ -502,6 +520,187 @@ export default function Admin() {
     } catch (err) {
       console.error("❌ Auto-assign error:", err);
       toast.error(`Failed to auto-assign: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchStudentsForManualAssign = async () => {
+    setLoading(true);
+    try {
+      // Fetch current event setting
+      const { data: eventData } = await supabase
+        .from("app_settings")
+        .select("setting_value")
+        .eq("setting_key", "current_event_for_availability")
+        .single();
+      
+      if (eventData) {
+        setCurrentEventForAssign(eventData.setting_value || "");
+      }
+
+      // Fetch all active students with availability status
+      const { data: students, error } = await supabase
+        .from("students")
+        .select("tr_number, name, branch, available_in_mumbai")
+        .eq("is_active", true)
+        .order("available_in_mumbai", { ascending: false })
+        .order("name");
+      
+      if (error) throw error;
+      
+      setAvailableStudents(students || []);
+      setShowManualAssign(true);
+      
+      // Auto-select all available students
+      const availableTrNumbers = students
+        ?.filter(s => s.available_in_mumbai)
+        .map(s => s.tr_number) || [];
+      setSelectedStudents(new Set(availableTrNumbers));
+      
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load students");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleStudentSelection = (trNumber: string) => {
+    const newSelection = new Set(selectedStudents);
+    if (newSelection.has(trNumber)) {
+      newSelection.delete(trNumber);
+    } else {
+      newSelection.add(trNumber);
+    }
+    setSelectedStudents(newSelection);
+  };
+
+  const selectAllAvailable = () => {
+    const availableTrNumbers = availableStudents
+      .filter(s => s.available_in_mumbai)
+      .map(s => s.tr_number);
+    setSelectedStudents(new Set(availableTrNumbers));
+  };
+
+  const selectAll = () => {
+    const allTrNumbers = availableStudents.map(s => s.tr_number);
+    setSelectedStudents(new Set(allTrNumbers));
+  };
+
+  const deselectAll = () => {
+    setSelectedStudents(new Set());
+  };
+
+  const manualAssign = async () => {
+    if (selectedStudents.size === 0) {
+      toast.error("Please select at least one student");
+      return;
+    }
+
+    // Prompt for event tag
+    const eventTag = prompt("Enter event name/tag for this assignment batch (e.g., 'Zikra1447'):", currentEventForAssign);
+    if (!eventTag || !eventTag.trim()) {
+      toast.error("Event tag is required");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      console.log("🚀 Starting manual assign...");
+      console.log(`👥 Selected ${selectedStudents.size} students`);
+
+      const selectedStudentsList = Array.from(selectedStudents);
+
+      // Fetch ALL beneficiaries with pagination
+      const allBeneficiaries = [];
+      let offset = 0;
+      const fetchBatchSize = 1000;
+      
+      console.log("📥 Fetching all beneficiaries...");
+      while (true) {
+        const { data, error } = await supabase
+          .from("beneficiaries")
+          .select("its_id")
+          .order('its_id')
+          .range(offset, offset + fetchBatchSize - 1);
+        
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        allBeneficiaries.push(...data);
+        offset += fetchBatchSize;
+        console.log(`📥 Loaded ${allBeneficiaries.length} beneficiaries...`);
+      }
+
+      // Fetch ALL assignments with pagination
+      const allAssignments = [];
+      offset = 0;
+      
+      console.log("📥 Fetching all assignments...");
+      while (true) {
+        const { data, error } = await supabase
+          .from("assignments")
+          .select("beneficiary_its_id")
+          .order('beneficiary_its_id')
+          .range(offset, offset + fetchBatchSize - 1);
+        
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        allAssignments.push(...data);
+        offset += fetchBatchSize;
+        console.log(`📥 Loaded ${allAssignments.length} assignments...`);
+      }
+
+      // Create a Set of assigned ITS IDs for fast lookup
+      const assignedSet = new Set(allAssignments.map(a => a.beneficiary_its_id));
+      
+      // Filter to get only unassigned beneficiaries
+      const unassignedBeneficiaries = allBeneficiaries.filter(b => !assignedSet.has(b.its_id));
+      
+      console.log(`👤 Total beneficiaries: ${allBeneficiaries.length}`);
+      console.log(`📋 Already assigned: ${assignedSet.size}`);
+      console.log(`✅ Unassigned beneficiaries: ${unassignedBeneficiaries.length}`);
+
+      if (unassignedBeneficiaries.length === 0) {
+        toast.success("All beneficiaries are already assigned");
+        setLoading(false);
+        return;
+      }
+
+      // Distribute unassigned beneficiaries evenly among SELECTED students
+      const newAssignments = unassignedBeneficiaries.map((beneficiary, index) => ({
+        beneficiary_its_id: beneficiary.its_id,
+        student_tr_number: selectedStudentsList[index % selectedStudentsList.length],
+        event_tag: eventTag.trim(),
+      }));
+
+      console.log(`📦 Inserting ${newAssignments.length} new assignments...`);
+
+      // Insert in batches
+      const insertBatchSize = 500;
+      for (let i = 0; i < newAssignments.length; i += insertBatchSize) {
+        const batch = newAssignments.slice(i, i + insertBatchSize);
+        const { error } = await supabase.from("assignments").insert(batch);
+        if (error) {
+          console.error(`❌ Error at batch ${i}:`, error);
+          throw error;
+        }
+        console.log(`✅ Inserted batch ${Math.floor(i / insertBatchSize) + 1}/${Math.ceil(newAssignments.length / insertBatchSize)}`);
+      }
+
+      console.log(`✅ Successfully assigned ${newAssignments.length} beneficiaries to ${selectedStudents.size} students`);
+      toast.success(`Assigned ${newAssignments.length} new beneficiaries for "${eventTag}" to ${selectedStudents.size} students (~${Math.ceil(unassignedBeneficiaries.length / selectedStudents.size)} per student)`);
+      
+      setShowManualAssign(false);
+      setSelectedStudents(new Set());
+      fetchStats();
+      fetchStudentProgress();
+      fetchEventAnalytics();
+    } catch (err) {
+      console.error("❌ Manual-assign error:", err);
+      toast.error(`Failed to manually assign: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -978,7 +1177,171 @@ export default function Admin() {
 
           {/* Actions Tab */}
           <TabsContent value="actions" className="space-y-6">
+            {/* Manual Assignment Modal/Section */}
+            {showManualAssign && (
+              <div className="card-elevated p-6 border-2 border-primary">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-serif text-xl mb-1">Manual Student Selection</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Select students for assignment • Event: <span className="font-medium">{currentEventForAssign}</span>
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setShowManualAssign(false);
+                      setSelectedStudents(new Set());
+                    }}
+                  >
+                    <X className="w-5 h-5" />
+                  </Button>
+                </div>
+
+                {/* Selection Controls */}
+                <div className="flex items-center gap-3 mb-4 pb-4 border-b border-border">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={selectAllAvailable}
+                    className="text-green-600 border-green-600 hover:bg-green-50 dark:hover:bg-green-950"
+                  >
+                    Select All Available ({availableStudents.filter(s => s.available_in_mumbai).length})
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={selectAll}>
+                    Select All ({availableStudents.length})
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={deselectAll}>
+                    Deselect All
+                  </Button>
+                  <div className="ml-auto text-sm font-medium">
+                    Selected: {selectedStudents.size} students
+                  </div>
+                </div>
+
+                {/* Students List */}
+                <div className="space-y-2 max-h-96 overflow-y-auto mb-4">
+                  {/* Available Students - Green Section */}
+                  {availableStudents.filter(s => s.available_in_mumbai).length > 0 && (
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 mb-2 sticky top-0 bg-background py-2">
+                        <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                        <h4 className="font-medium text-sm text-green-600 dark:text-green-400">
+                          Available in Mumbai ({availableStudents.filter(s => s.available_in_mumbai).length})
+                        </h4>
+                      </div>
+                      {availableStudents
+                        .filter(s => s.available_in_mumbai)
+                        .map((student) => (
+                          <label
+                            key={student.tr_number}
+                            className="flex items-center gap-3 p-3 rounded-lg border-2 border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/20 cursor-pointer hover:bg-green-100 dark:hover:bg-green-950/40 transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedStudents.has(student.tr_number)}
+                              onChange={() => toggleStudentSelection(student.tr_number)}
+                              className="w-5 h-5 rounded border-gray-300"
+                            />
+                            <div className="flex-1">
+                              <p className="font-medium text-foreground">{student.name}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {student.tr_number} • {student.branch || "No branch"}
+                              </p>
+                            </div>
+                            <span className="text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-700 dark:text-green-300 font-medium">
+                              Available
+                            </span>
+                          </label>
+                        ))}
+                    </div>
+                  )}
+
+                  {/* Other Students */}
+                  {availableStudents.filter(s => !s.available_in_mumbai).length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-2 sticky top-0 bg-background py-2">
+                        <div className="w-3 h-3 rounded-full bg-gray-400"></div>
+                        <h4 className="font-medium text-sm text-muted-foreground">
+                          Other Students ({availableStudents.filter(s => !s.available_in_mumbai).length})
+                        </h4>
+                      </div>
+                      {availableStudents
+                        .filter(s => !s.available_in_mumbai)
+                        .map((student) => (
+                          <label
+                            key={student.tr_number}
+                            className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card cursor-pointer hover:bg-muted transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedStudents.has(student.tr_number)}
+                              onChange={() => toggleStudentSelection(student.tr_number)}
+                              className="w-5 h-5 rounded border-gray-300"
+                            />
+                            <div className="flex-1">
+                              <p className="font-medium text-foreground">{student.name}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {student.tr_number} • {student.branch || "No branch"}
+                              </p>
+                            </div>
+                          </label>
+                        ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center gap-3">
+                  <Button
+                    onClick={manualAssign}
+                    disabled={loading || selectedStudents.size === 0}
+                    className="flex-1"
+                  >
+                    {loading ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Play className="w-4 h-4 mr-2" />
+                    )}
+                    Assign to {selectedStudents.size} Selected Student{selectedStudents.size !== 1 ? 's' : ''}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowManualAssign(false);
+                      setSelectedStudents(new Set());
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+
             <div className="grid md:grid-cols-3 gap-6">
+              {/* Manual Assign Card */}
+              <div className="card-elevated p-6 border-2 border-primary">
+                <h3 className="font-serif text-lg mb-2 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-primary" />
+                  Manual Assignment
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Select specific students who are available in Mumbai for targeted assignment of unassigned beneficiaries.
+                </p>
+                <Button
+                  onClick={fetchStudentsForManualAssign}
+                  disabled={loading || stats.totalAssignments >= stats.totalBeneficiaries}
+                  className="w-full"
+                >
+                  {loading ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Users className="w-4 h-4 mr-2" />
+                  )}
+                  Select Students
+                </Button>
+              </div>
+
               <div className="card-elevated p-6">
                 <h3 className="font-serif text-lg mb-2">Auto-Assign Beneficiaries</h3>
                 <p className="text-sm text-muted-foreground mb-4">
@@ -1088,6 +1451,52 @@ export default function Admin() {
                 >
                   Delete Beneficiaries & Assignments
                 </Button>
+              </div>
+
+              {/* Update Current Event Setting */}
+              <div className="card-elevated p-6">
+                <h3 className="font-serif text-lg mb-2">Set Current Event</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Update the event name shown to students for availability check.
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="e.g., Urus Mubarak 1449"
+                    value={currentEventForAssign}
+                    onChange={(e) => setCurrentEventForAssign(e.target.value)}
+                    disabled={loading}
+                  />
+                  <Button
+                    onClick={async () => {
+                      if (!currentEventForAssign.trim()) {
+                        toast.error("Event name cannot be empty");
+                        return;
+                      }
+                      setLoading(true);
+                      try {
+                        const { error } = await supabase
+                          .from("app_settings")
+                          .upsert({
+                            setting_key: "current_event_for_availability",
+                            setting_value: currentEventForAssign.trim(),
+                            updated_at: new Date().toISOString(),
+                          }, {
+                            onConflict: 'setting_key'
+                          });
+                        if (error) throw error;
+                        toast.success("Event name updated");
+                      } catch (err) {
+                        console.error(err);
+                        toast.error("Failed to update event");
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    disabled={loading}
+                  >
+                    Update
+                  </Button>
+                </div>
               </div>
 
               <div className="card-elevated p-6">

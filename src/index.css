@@ -11,6 +11,28 @@
 @import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Inter:wght@400;500;600;700&display=swap');
 
 @layer base {
+  /* Mobile app-like behavior */
+  * {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+
+  html {
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+    touch-action: manipulation;
+  }
+
+  body {
+    overflow-x: hidden;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  input, textarea, select, button {
+    font-size: 16px !important; /* Prevents iOS zoom on focus */
+  }
+
   :root {
     /* Core palette - warm, earthy, calm */
     --background: 40 20% 98%;
