@@ -14,6 +14,7 @@ import {
   Search,
   RefreshCw,
   X,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
@@ -32,6 +33,7 @@ interface StudentProgress {
   branch: string;
   assigned: number;
   completed: number;
+  available_in_mumbai: boolean;
 }
 
 interface EventAnalytics {
@@ -56,6 +58,7 @@ export default function Admin() {
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedEvent, setSelectedEvent] = useState<string>("");
+  const [selectedEventForUnassign, setSelectedEventForUnassign] = useState<string>("");
   const [sortBy, setSortBy] = useState<"name" | "branch" | "assigned" | "completed" | "progress">("name");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [newStudent, setNewStudent] = useState({
@@ -69,6 +72,33 @@ export default function Admin() {
   const [availableStudents, setAvailableStudents] = useState<Array<{ tr_number: string; name: string; branch: string; available_in_mumbai: boolean }>>([]);
   const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set());
   const [currentEventForAssign, setCurrentEventForAssign] = useState("");
+  const [existingEventTags, setExistingEventTags] = useState<string[]>([]);
+  const [selectedEventTag, setSelectedEventTag] = useState("");
+  const [beneficiaryCap, setBeneficiaryCap] = useState<string>("");
+  const [selectedStudentForUnassign, setSelectedStudentForUnassign] = useState<string>("");
+  const [whatsappTemplate, setWhatsappTemplate] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [savingTemplates, setSavingTemplates] = useState(false);
+  const [unassignmentRequests, setUnassignmentRequests] = useState<Array<{
+    id: string;
+    student_tr_number: string;
+    student_name: string;
+    event_tag: string;
+    reason: string;
+    created_at: string;
+    pending_count: number;
+  }>>([]);
+  const [processingRequest, setProcessingRequest] = useState<string | null>(null);
+  const [assignmentRequests, setAssignmentRequests] = useState<Array<{
+    id: string;
+    student_tr_number: string;
+    student_name: string;
+    event_tag: string;
+    reason: string;
+    created_at: string;
+    current_assignments: number;
+  }>>([]);
 
   // Simple password check (in production, use proper auth)
   const handleLogin = () => {
@@ -86,6 +116,69 @@ export default function Admin() {
       fetchStudentProgress();
       fetchEventAnalytics();
       fetchCurrentEventSetting();
+      fetchMessageTemplates();
+      fetchUnassignmentRequests();
+      fetchAssignmentRequests();
+
+      // Real-time subscription for assignment requests
+      const assignmentRequestsChannel = supabase
+        .channel("assignment_requests_changes")
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "assignment_requests",
+          },
+          (payload) => {
+            console.log("🔔 Assignment request change detected:", payload);
+            
+            // Handle DELETE events immediately by removing from state
+            if (payload.eventType === "DELETE" && payload.old?.id) {
+              console.log("🗑️ Request deleted, removing from UI:", payload.old.id);
+              setAssignmentRequests(prev => prev.filter(req => req.id !== payload.old.id));
+              return;
+            }
+            
+            // For INSERT and UPDATE, refresh the list
+            console.log("🔄 Refreshing assignment requests...");
+            fetchAssignmentRequests();
+          }
+        )
+        .subscribe();
+
+      // Real-time subscription for unassignment requests
+      const unassignmentRequestsChannel = supabase
+        .channel("unassignment_requests_changes")
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "unassignment_requests",
+          },
+          (payload) => {
+            console.log("🔔 Unassignment request change detected:", payload);
+            
+            // Handle DELETE events immediately by removing from state
+            if (payload.eventType === "DELETE" && payload.old?.id) {
+              console.log("🗑️ Unassignment request deleted, removing from UI:", payload.old.id);
+              setUnassignmentRequests(prev => prev.filter(req => req.id !== payload.old.id));
+              return;
+            }
+            
+            // For INSERT and UPDATE, refresh the list
+            console.log("🔄 Refreshing unassignment requests...");
+            fetchUnassignmentRequests();
+          }
+        )
+        .subscribe();
+
+      // Cleanup subscriptions on unmount
+      return () => {
+        supabase.removeChannel(assignmentRequestsChannel);
+        supabase.removeChannel(unassignmentRequestsChannel);
+      };
     }
   }, [authenticated]);
 
@@ -99,6 +192,18 @@ export default function Admin() {
     if (data) {
       setCurrentEventForAssign(data.setting_value || "");
     }
+  };
+
+  const fetchMessageTemplates = async () => {
+    const [whatsapp, emailSubj, emailBod] = await Promise.all([
+      supabase.from("app_settings").select("setting_value").eq("setting_key", "whatsapp_message_template").single(),
+      supabase.from("app_settings").select("setting_value").eq("setting_key", "email_message_subject").single(),
+      supabase.from("app_settings").select("setting_value").eq("setting_key", "email_message_body").single(),
+    ]);
+
+    setWhatsappTemplate(whatsapp.data?.setting_value || "Afzal Us Salam\n\nKem cho?\n\nHame Darajah 11 1449H batch che from Al Jamea tus Saifiyah.\n\nSyedna Taher Saifuddin Aqa RA na Urus Mubarak na Ayyam ma hame ye aapna taraf si naam lai ne Rauzat Tahera ma bewe Moula ni zyarat kidi che.\n\nThis amal has been done as a part of khidmat from HadiAshar 1449 batch.\n\nKhuda sagla mumineen ne Rauzat Tahera ni zyarat naseeb kare.\n\nWasalaam");
+    setEmailSubject(emailSubj.data?.setting_value || "Ziyarat Khidmat - Rawdat Tahera");
+    setEmailBody(emailBod.data?.setting_value || "Afzal Us Salam\n\nKem cho?\n\nHame ye Syedna Taher Saifuddin Aqa RA na Urus Mubarak na Ayyam ma aapna taraf si naam lai ne Rauzat Tahera ma bewe Moula ni zyarat kidi che.\n\nThis amal has been done as a part of khidmat from HadiAshar 1449 batch.\n\nKhuda sagla mumineen ne Rauzat Tahera ni zyarat naseeb kare.\n\nWasalaam");
   };
 
   const fetchStats = async () => {
@@ -123,7 +228,7 @@ export default function Admin() {
   const fetchStudentProgress = async () => {
     const { data: students } = await supabase
       .from("students")
-      .select("tr_number, name, branch")
+      .select("tr_number, name, branch, available_in_mumbai")
       .eq("is_active", true)
       .order("name");
 
@@ -147,6 +252,7 @@ export default function Admin() {
         branch: student.branch || "",
         assigned: assigned.count || 0,
         completed: completed.count || 0,
+        available_in_mumbai: student.available_in_mumbai || false,
       };
     });
 
@@ -539,6 +645,25 @@ export default function Admin() {
         setCurrentEventForAssign(eventData.setting_value || "");
       }
 
+      // Fetch existing event tags from assignments
+      const { data: eventTagsData, error: eventTagsError } = await supabase
+        .from("assignments")
+        .select("event_tag")
+        .not("event_tag", "is", null);
+
+      if (eventTagsError) throw eventTagsError;
+      
+      // Get unique event tags and sort them
+      const uniqueTags = [...new Set(eventTagsData?.map(a => a.event_tag) || [])];
+      setExistingEventTags(uniqueTags.sort());
+      
+      // Set default selection to current event if it exists in the list
+      if (eventData?.setting_value && uniqueTags.includes(eventData.setting_value)) {
+        setSelectedEventTag(eventData.setting_value);
+      } else if (uniqueTags.length > 0) {
+        setSelectedEventTag(uniqueTags[0]);
+      }
+
       // Fetch all active students with availability status
       const { data: students, error } = await supabase
         .from("students")
@@ -598,12 +723,12 @@ export default function Admin() {
       return;
     }
 
-    // Prompt for event tag
-    const eventTag = prompt("Enter event name/tag for this assignment batch (e.g., 'Zikra1447'):", currentEventForAssign);
-    if (!eventTag || !eventTag.trim()) {
-      toast.error("Event tag is required");
+    // Use selected event tag from dropdown
+    if (!selectedEventTag || !selectedEventTag.trim()) {
+      toast.error("Please select an event tag");
       return;
     }
+    const eventTag = selectedEventTag;
 
     setLoading(true);
     try {
@@ -657,7 +782,7 @@ export default function Admin() {
       const assignedSet = new Set(allAssignments.map(a => a.beneficiary_its_id));
       
       // Filter to get only unassigned beneficiaries
-      const unassignedBeneficiaries = allBeneficiaries.filter(b => !assignedSet.has(b.its_id));
+      let unassignedBeneficiaries = allBeneficiaries.filter(b => !assignedSet.has(b.its_id));
       
       console.log(`👤 Total beneficiaries: ${allBeneficiaries.length}`);
       console.log(`📋 Already assigned: ${assignedSet.size}`);
@@ -667,6 +792,27 @@ export default function Admin() {
         toast.success("All beneficiaries are already assigned");
         setLoading(false);
         return;
+      }
+
+      // Apply beneficiary cap if specified
+      const cap = beneficiaryCap.trim() ? parseInt(beneficiaryCap.trim()) : unassignedBeneficiaries.length;
+      
+      // Validate cap
+      if (cap > unassignedBeneficiaries.length) {
+        toast.error(`Cap (${cap}) exceeds available unassigned beneficiaries (${unassignedBeneficiaries.length})`);
+        setLoading(false);
+        return;
+      }
+      
+      if (cap <= 0) {
+        toast.error("Cap must be a positive number");
+        setLoading(false);
+        return;
+      }
+      
+      if (cap < unassignedBeneficiaries.length) {
+        unassignedBeneficiaries = unassignedBeneficiaries.slice(0, cap);
+        console.log(`📊 Applied cap: assigning ${cap} beneficiaries`);
       }
 
       // Distribute unassigned beneficiaries evenly among SELECTED students
@@ -703,6 +849,352 @@ export default function Admin() {
       toast.error(`Failed to manually assign: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const unassignPending = async () => {
+    if (!selectedEventForUnassign) {
+      toast.error("Please select an event");
+      return;
+    }
+
+    const eventData = eventAnalytics.find(e => e.event_tag === selectedEventForUnassign);
+    if (!eventData || eventData.pending === 0) {
+      toast.error("No pending assignments found for this event");
+      return;
+    }
+
+    if (!confirm(`⚠️ Unassign ${eventData.pending} PENDING assignments from "${selectedEventForUnassign}"?\n\nThis will:\n- Remove ${eventData.pending} incomplete assignments\n- Keep ${eventData.completed} completed assignments\n- Make these beneficiaries available for reassignment\n\nContinue?`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      console.log(`🔄 Unassigning pending assignments for "${selectedEventForUnassign}"...`);
+
+      // Delete only pending assignments for this event
+      const { error } = await supabase
+        .from("assignments")
+        .delete()
+        .eq("event_tag", selectedEventForUnassign)
+        .eq("status", "pending");
+
+      if (error) throw error;
+
+      toast.success(`Unassigned ${eventData.pending} pending assignments from "${selectedEventForUnassign}". These beneficiaries can now be reassigned using Manual Assignment.`);
+      setSelectedEventForUnassign("");
+      fetchStats();
+      fetchStudentProgress();
+      fetchEventAnalytics();
+    } catch (err) {
+      console.error("❌ Unassign error:", err);
+      toast.error(`Failed to unassign: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const unassignByStudent = async () => {
+    if (!selectedStudentForUnassign) {
+      toast.error("Please select a student");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Get student's pending assignments count
+      const { count: pendingCount, error: countError } = await supabase
+        .from("assignments")
+        .select("id", { count: "exact", head: true })
+        .eq("student_tr_number", selectedStudentForUnassign)
+        .eq("status", "pending");
+
+      if (countError) throw countError;
+
+      if (pendingCount === 0) {
+        toast.error("This student has no pending assignments");
+        setLoading(false);
+        return;
+      }
+
+      const studentInfo = studentProgress.find(s => s.tr_number === selectedStudentForUnassign);
+      const studentName = studentInfo?.name || selectedStudentForUnassign;
+
+      if (!confirm(`⚠️ Unassign ${pendingCount} PENDING assignments from ${studentName}?\n\nTR: ${selectedStudentForUnassign}\n\nThis will:\n- Remove ${pendingCount} incomplete assignments\n- Keep completed assignments\n- Make these beneficiaries available for reassignment\n\nContinue?`)) {
+        setLoading(false);
+        return;
+      }
+
+      console.log(`🔄 Unassigning pending assignments for student ${selectedStudentForUnassign}...`);
+
+      // Delete only pending assignments for this student
+      const { error } = await supabase
+        .from("assignments")
+        .delete()
+        .eq("student_tr_number", selectedStudentForUnassign)
+        .eq("status", "pending");
+
+      if (error) throw error;
+
+      toast.success(`Unassigned ${pendingCount} pending assignments from ${studentName}. These beneficiaries can now be reassigned.`);
+      setSelectedStudentForUnassign("");
+      fetchStats();
+      fetchStudentProgress();
+      fetchEventAnalytics();
+    } catch (err) {
+      console.error("❌ Unassign by student error:", err);
+      toast.error(`Failed to unassign: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveMessageTemplates = async () => {
+    setSavingTemplates(true);
+    try {
+      await Promise.all([
+        supabase.from("app_settings").upsert({
+          setting_key: "whatsapp_message_template",
+          setting_value: whatsappTemplate,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'setting_key' }),
+        supabase.from("app_settings").upsert({
+          setting_key: "email_message_subject",
+          setting_value: emailSubject,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'setting_key' }),
+        supabase.from("app_settings").upsert({
+          setting_key: "email_message_body",
+          setting_value: emailBody,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'setting_key' }),
+      ]);
+      toast.success("Message templates updated successfully");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to save templates");
+    } finally {
+      setSavingTemplates(false);
+    }
+  };
+
+  const fetchUnassignmentRequests = async () => {
+    try {
+      const { data: requests, error } = await supabase
+        .from("unassignment_requests")
+        .select("id, student_tr_number, event_tag, reason, created_at")
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      if (!requests || requests.length === 0) {
+        setUnassignmentRequests([]);
+        return;
+      }
+
+      // Fetch student names and pending counts
+      const enrichedRequests = await Promise.all(
+        requests.map(async (req) => {
+          const [studentData, pendingCount] = await Promise.all([
+            supabase.from("students").select("name").eq("tr_number", req.student_tr_number).single(),
+            supabase.from("assignments").select("id", { count: "exact", head: true })
+              .eq("student_tr_number", req.student_tr_number)
+              .eq("status", "pending"),
+          ]);
+
+          return {
+            ...req,
+            student_name: studentData.data?.name || req.student_tr_number,
+            pending_count: pendingCount.count || 0,
+          };
+        })
+      );
+
+      // Filter out requests with 0 pending assignments
+      setUnassignmentRequests(enrichedRequests.filter(r => r.pending_count > 0));
+    } catch (err) {
+      console.error("Failed to fetch unassignment requests", err);
+    }
+  };
+
+  const approveUnassignmentRequest = async (requestId: string, studentTr: string, eventTag: string) => {
+    setProcessingRequest(requestId);
+    try {
+      // Delete pending assignments for this student
+      const { error: deleteError } = await supabase
+        .from("assignments")
+        .delete()
+        .eq("student_tr_number", studentTr)
+        .eq("status", "pending");
+
+      if (deleteError) throw deleteError;
+
+      // Update request status
+      const { error: updateError } = await supabase
+        .from("unassignment_requests")
+        .update({
+          status: "approved",
+          processed_at: new Date().toISOString(),
+          processed_by: "admin",
+        })
+        .eq("id", requestId);
+
+      if (updateError) throw updateError;
+
+      toast.success("Request approved and assignments unassigned");
+      fetchUnassignmentRequests();
+      fetchStats();
+      fetchStudentProgress();
+      fetchEventAnalytics();
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to approve request");
+    } finally {
+      setProcessingRequest(null);
+    }
+  };
+
+  const rejectUnassignmentRequest = async (requestId: string) => {
+    setProcessingRequest(requestId);
+    try {
+      const { error } = await supabase
+        .from("unassignment_requests")
+        .update({
+          status: "rejected",
+          processed_at: new Date().toISOString(),
+          processed_by: "admin",
+        })
+        .eq("id", requestId);
+
+      if (error) throw error;
+
+      // Immediately remove from state for instant UI update
+      setUnassignmentRequests(prev => prev.filter(req => req.id !== requestId));
+      toast.success("Request rejected");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to reject request");
+      // Refetch on error to ensure consistency
+      fetchUnassignmentRequests();
+    } finally {
+      setProcessingRequest(null);
+    }
+  };
+
+  const fetchAssignmentRequests = async () => {
+    try {
+      console.log("📥 Fetching assignment requests from database...");
+      
+      const { data: requests, error } = await supabase
+        .from("assignment_requests")
+        .select("id, student_tr_number, event_tag, reason, created_at, status")
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      console.log(`📊 Found ${requests?.length || 0} pending requests in database:`, requests);
+
+      if (!requests || requests.length === 0) {
+        setAssignmentRequests([]);
+        return;
+      }
+
+      // Fetch student names and current assignment counts
+      const enrichedRequests = await Promise.all(
+        requests.map(async (req) => {
+          const [studentData, assignmentCount] = await Promise.all([
+            supabase.from("students").select("name").eq("tr_number", req.student_tr_number).single(),
+            supabase.from("assignments").select("id", { count: "exact", head: true })
+              .eq("student_tr_number", req.student_tr_number),
+          ]);
+
+          return {
+            ...req,
+            student_name: studentData.data?.name || req.student_tr_number,
+            current_assignments: assignmentCount.count || 0,
+          };
+        })
+      );
+
+      console.log("📋 Enriched requests:", enrichedRequests);
+
+      // Filter to only show requests from students with 0 assignments
+      // If they have assignments now, it means request was fulfilled
+      const activeRequests = enrichedRequests.filter(r => r.current_assignments === 0);
+      
+      console.log(`✅ Active requests (0 assignments): ${activeRequests.length}`, activeRequests);
+      
+      // Auto-approve fulfilled requests (students who now have assignments)
+      const fulfilledRequests = enrichedRequests.filter(r => r.current_assignments > 0);
+      if (fulfilledRequests.length > 0) {
+        console.log(`🎯 Auto-approving ${fulfilledRequests.length} fulfilled requests`);
+        await Promise.all(
+          fulfilledRequests.map(req =>
+            supabase
+              .from("assignment_requests")
+              .update({
+                status: "approved",
+                processed_at: new Date().toISOString(),
+                processed_by: "auto",
+              })
+              .eq("id", req.id)
+          )
+        );
+      }
+
+      setAssignmentRequests(activeRequests);
+    } catch (err) {
+      console.error("Failed to fetch assignment requests", err);
+    }
+  };
+
+  const revertAssignmentRequest = async (requestId: string) => {
+    const requestToReject = assignmentRequests.find(r => r.id === requestId);
+    
+    if (!requestToReject) {
+      toast.error("Request not found");
+      return;
+    }
+
+    if (!confirm(`Delete assignment request from ${requestToReject.student_name}?\n\nThis will permanently remove the request.`)) {
+      return;
+    }
+
+    setProcessingRequest(requestId);
+    
+    // Always remove from UI first (optimistic update)
+    setAssignmentRequests(prev => prev.filter(req => req.id !== requestId));
+    
+    try {
+      console.log("🗑️ Force deleting assignment request:", { requestId, student: requestToReject.student_name });
+      
+      // Attempt to delete from database
+      const { data, error } = await supabase
+        .from("assignment_requests")
+        .delete()
+        .eq("id", requestId)
+        .select();
+
+      console.log("✅ Delete result:", { data, error, deletedCount: data?.length });
+
+      if (error) {
+        console.error("❌ Delete failed:", error);
+        // Don't throw - UI already cleared, just log it
+      }
+
+      if (!data || data.length === 0) {
+        console.warn("⚠️ No rows deleted - request was already removed from database");
+      }
+
+      toast.success(`Request cleared from view`);
+    } catch (err) {
+      console.error("❌ Deletion error:", err);
+      // UI already cleared, so don't add it back
+      toast.success("Request removed from view");
+    } finally {
+      setProcessingRequest(null);
     }
   };
 
@@ -836,7 +1328,7 @@ export default function Admin() {
       {/* Main Content */}
       <main className="container max-w-6xl mx-auto py-6 px-4">
         <Tabs defaultValue="data" className="space-y-6">
-          <TabsList className="grid w-full max-w-2xl grid-cols-4">
+          <TabsList className="grid w-full max-w-3xl grid-cols-5">
             <TabsTrigger value="data" className="gap-2">
               <Upload className="w-4 h-4" />
               Data
@@ -852,6 +1344,15 @@ export default function Admin() {
             <TabsTrigger value="actions" className="gap-2">
               <Settings className="w-4 h-4" />
               Actions
+            </TabsTrigger>
+            <TabsTrigger value="requests" className="gap-2">
+              <RefreshCw className="w-4 h-4" />
+              Requests
+              {(unassignmentRequests.length + assignmentRequests.length) > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-destructive text-destructive-foreground">
+                  {unassignmentRequests.length + assignmentRequests.length}
+                </span>
+              )}
             </TabsTrigger>
           </TabsList>
 
@@ -1140,7 +1641,14 @@ export default function Admin() {
                   </thead>
                   <tbody>
                     {filteredProgress.map((student) => (
-                      <tr key={student.tr_number} className="border-b border-border table-row-hover">
+                      <tr 
+                        key={student.tr_number} 
+                        className={`border-b border-border table-row-hover ${
+                          student.available_in_mumbai 
+                            ? 'bg-green-50 dark:bg-green-950/20 hover:bg-green-100 dark:hover:bg-green-950/30' 
+                            : ''
+                        }`}
+                      >
                         <td className="py-3 px-4">
                           <div>
                             <p className="font-medium text-foreground">{student.name}</p>
@@ -1184,7 +1692,7 @@ export default function Admin() {
                   <div>
                     <h3 className="font-serif text-xl mb-1">Manual Student Selection</h3>
                     <p className="text-sm text-muted-foreground">
-                      Select students for assignment • Event: <span className="font-medium">{currentEventForAssign}</span>
+                      Select students and event for assignment
                     </p>
                   </div>
                   <Button
@@ -1198,24 +1706,66 @@ export default function Admin() {
                   </Button>
                 </div>
 
-                {/* Selection Controls */}
-                <div className="flex items-center gap-3 mb-4 pb-4 border-b border-border">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={selectAllAvailable}
-                    className="text-green-600 border-green-600 hover:bg-green-50 dark:hover:bg-green-950"
+                {/* Event Tag Selection */}
+                <div className="mb-4 pb-4 border-b border-border">
+                  <label className="text-sm font-medium mb-2 block">
+                    Event Tag <span className="text-destructive">*</span>
+                  </label>
+                  <select
+                    value={selectedEventTag}
+                    onChange={(e) => setSelectedEventTag(e.target.value)}
+                    className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm"
+                    disabled={loading}
                   >
-                    Select All Available ({availableStudents.filter(s => s.available_in_mumbai).length})
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={selectAll}>
-                    Select All ({availableStudents.length})
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={deselectAll}>
-                    Deselect All
-                  </Button>
-                  <div className="ml-auto text-sm font-medium">
-                    Selected: {selectedStudents.size} students
+                    <option value="">Select event tag...</option>
+                    {existingEventTags.map((tag) => (
+                      <option key={tag} value={tag}>
+                        {tag}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Select from existing event tags. Create new tags in "Set Current Event" section.
+                  </p>
+                </div>
+
+                {/* Selection Controls */}
+                <div className="flex flex-col gap-3 mb-4 pb-4 border-b border-border">
+                  <div className="flex items-center gap-3">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={selectAllAvailable}
+                      className="text-green-600 border-green-600 hover:bg-green-50 dark:hover:bg-green-950"
+                    >
+                      Select All Available ({availableStudents.filter(s => s.available_in_mumbai).length})
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={selectAll}>
+                      Select All ({availableStudents.length})
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={deselectAll}>
+                      Deselect All
+                    </Button>
+                    <div className="ml-auto text-sm font-medium">
+                      Selected: {selectedStudents.size} students
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <label className="text-sm font-medium whitespace-nowrap">
+                      Beneficiaries to assign:
+                    </label>
+                    <Input
+                      type="number"
+                      placeholder={`Max: ${stats.totalBeneficiaries - stats.totalAssignments} unassigned`}
+                      value={beneficiaryCap}
+                      onChange={(e) => setBeneficiaryCap(e.target.value)}
+                      className="max-w-xs"
+                      min="1"
+                      max={stats.totalBeneficiaries - stats.totalAssignments}
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      Available: {stats.totalBeneficiaries - stats.totalAssignments} unassigned
+                    </span>
                   </div>
                 </div>
 
@@ -1235,7 +1785,7 @@ export default function Admin() {
                         .map((student) => (
                           <label
                             key={student.tr_number}
-                            className="flex items-center gap-3 p-3 rounded-lg border-2 border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/20 cursor-pointer hover:bg-green-100 dark:hover:bg-green-950/40 transition-colors"
+                            className="flex items-center gap-3 p-3 rounded-lg border-2 border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/20 cursor-pointer hover:bg-green-100 dark:hover:bg-green-950/40 transition-all shadow-lg shadow-green-500/30 dark:shadow-green-500/20"
                           >
                             <input
                               type="checkbox"
@@ -1271,7 +1821,7 @@ export default function Admin() {
                         .map((student) => (
                           <label
                             key={student.tr_number}
-                            className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card cursor-pointer hover:bg-muted transition-colors"
+                            className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card cursor-pointer hover:bg-muted transition-all shadow-md shadow-gray-400/20 dark:shadow-gray-600/10"
                           >
                             <input
                               type="checkbox"
@@ -1366,6 +1916,114 @@ export default function Admin() {
                 <Button variant="outline" onClick={exportReport}>
                   <Download className="w-4 h-4 mr-2" />
                   Download Report
+                </Button>
+              </div>
+
+              <div className="card-elevated p-6 border-2 border-blue-500">
+                <h3 className="font-serif text-lg mb-2 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-blue-500" />
+                  Unassign by Student
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Remove all pending assignments from a specific student. More granular control than event-based unassignment.
+                </p>
+                <select
+                  value={selectedStudentForUnassign}
+                  onChange={(e) => setSelectedStudentForUnassign(e.target.value)}
+                  className="w-full mb-3 px-3 py-2 border border-input rounded-md bg-background text-sm"
+                  disabled={loading}
+                >
+                  <option value="">Select a student...</option>
+                  {studentProgress
+                    .filter(student => student.assigned > student.completed)
+                    .map((student) => (
+                      <option 
+                        key={student.tr_number} 
+                        value={student.tr_number}
+                        className={student.available_in_mumbai ? 'bg-green-100 dark:bg-green-900' : ''}
+                      >
+                        {student.available_in_mumbai ? '🟢 ' : ''}{student.name} (TR: {student.tr_number}) - {student.assigned - student.completed} pending
+                      </option>
+                    ))}
+                </select>
+                {selectedStudentForUnassign && (() => {
+                  const student = studentProgress.find(s => s.tr_number === selectedStudentForUnassign);
+                  return student ? (
+                    <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900 rounded-md text-sm">
+                      <p className="font-medium text-blue-900 dark:text-blue-100 mb-1">
+                        {student.name}
+                      </p>
+                      <div className="text-blue-700 dark:text-blue-300 space-y-0.5">
+                        <p>TR: {student.tr_number} • Branch: {student.branch}</p>
+                        <p>Total Assigned: {student.assigned}</p>
+                        <p>Completed: {student.completed} ✓</p>
+                        <p className="font-semibold">Pending: {student.assigned - student.completed} (will be unassigned)</p>
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
+                <Button
+                  variant="outline"
+                  onClick={unassignByStudent}
+                  disabled={loading || !selectedStudentForUnassign}
+                  className="w-full border-blue-500 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
+                >
+                  {loading ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Users className="w-4 h-4 mr-2" />
+                  )}
+                  Unassign Student's Pending Work
+                </Button>
+              </div>
+
+              <div className="card-elevated p-6 border-2 border-orange-500">
+                <h3 className="font-serif text-lg mb-2 flex items-center gap-2">
+                  <RefreshCw className="w-5 h-5 text-orange-500" />
+                  Unassign Pending by Event
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Remove all incomplete assignments for an entire event. Beneficiaries become available for reassignment.
+                </p>
+                <select
+                  value={selectedEventForUnassign}
+                  onChange={(e) => setSelectedEventForUnassign(e.target.value)}
+                  className="w-full mb-3 px-3 py-2 border border-input rounded-md bg-background text-sm"
+                  disabled={loading || eventAnalytics.length === 0}
+                >
+                  <option value="">Select an event...</option>
+                  {eventAnalytics
+                    .filter(event => event.pending > 0)
+                    .map((event) => (
+                      <option key={event.event_tag} value={event.event_tag}>
+                        {event.event_tag} ({event.pending} pending, {event.completed} completed)
+                      </option>
+                    ))}
+                </select>
+                {selectedEventForUnassign && eventAnalytics.find(e => e.event_tag === selectedEventForUnassign) && (
+                  <div className="mb-3 p-3 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-900 rounded-md text-sm">
+                    <p className="font-medium text-orange-900 dark:text-orange-100 mb-1">
+                      {eventAnalytics.find(e => e.event_tag === selectedEventForUnassign)?.event_tag}
+                    </p>
+                    <div className="text-orange-700 dark:text-orange-300 space-y-0.5">
+                      <p>Total: {eventAnalytics.find(e => e.event_tag === selectedEventForUnassign)?.total}</p>
+                      <p>Completed: {eventAnalytics.find(e => e.event_tag === selectedEventForUnassign)?.completed} ✓</p>
+                      <p className="font-semibold">Pending: {eventAnalytics.find(e => e.event_tag === selectedEventForUnassign)?.pending} (will be unassigned)</p>
+                    </div>
+                  </div>
+                )}
+                <Button
+                  variant="outline"
+                  onClick={unassignPending}
+                  disabled={loading || !selectedEventForUnassign}
+                  className="w-full border-orange-500 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950"
+                >
+                  {loading ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                  )}
+                  Unassign Pending Assignments
                 </Button>
               </div>
 
@@ -1512,6 +2170,388 @@ export default function Admin() {
                   Refresh Now
                 </Button>
               </div>
+
+              {/* Message Templates Management */}
+              <div className="card-elevated p-6 md:col-span-2 border-2 border-purple-500">
+                <h3 className="font-serif text-xl mb-2 flex items-center gap-2">
+                  <Settings className="w-5 h-5 text-purple-500" />
+                  Contact Message Templates
+                </h3>
+                <p className="text-sm text-muted-foreground mb-6">
+                  Edit the default messages sent via WhatsApp and Email when students contact beneficiaries.
+                </p>
+
+                <div className="space-y-6">
+                  {/* WhatsApp Template */}
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-2 block">
+                      WhatsApp Message Template
+                    </label>
+                    <textarea
+                      value={whatsappTemplate}
+                      onChange={(e) => setWhatsappTemplate(e.target.value)}
+                      rows={8}
+                      className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm font-mono"
+                      placeholder="Enter WhatsApp message..."
+                      disabled={savingTemplates}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Use \n for line breaks. This appears in WhatsApp links.
+                    </p>
+                  </div>
+
+                  {/* Email Subject */}
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-2 block">
+                      Email Subject
+                    </label>
+                    <Input
+                      value={emailSubject}
+                      onChange={(e) => setEmailSubject(e.target.value)}
+                      placeholder="e.g., Ziyarat Khidmat - Rawdat Tahera"
+                      disabled={savingTemplates}
+                    />
+                  </div>
+
+                  {/* Email Body */}
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-2 block">
+                      Email Body Template
+                    </label>
+                    <textarea
+                      value={emailBody}
+                      onChange={(e) => setEmailBody(e.target.value)}
+                      rows={8}
+                      className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm font-mono"
+                      placeholder="Enter email body..."
+                      disabled={savingTemplates}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Use \n for line breaks. This appears in email clients.
+                    </p>
+                  </div>
+
+                  <Button
+                    onClick={saveMessageTemplates}
+                    disabled={savingTemplates}
+                    className="w-full"
+                  >
+                    {savingTemplates ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Settings className="w-4 h-4 mr-2" />
+                    )}
+                    Save Message Templates
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+
+          {/* Requests Tab */}
+          <TabsContent value="requests" className="space-y-6">
+            {/* Refresh All Button */}
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  fetchAssignmentRequests();
+                  fetchUnassignmentRequests();
+                }}
+                disabled={loading}
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Refresh All
+              </Button>
+            </div>
+
+            {/* Assignment Requests */}
+            <div className="card-elevated p-6 border-2 border-blue-500">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="font-serif text-xl mb-1 flex items-center gap-2">
+                    <Users className="w-5 h-5 text-blue-500" />
+                    Assignment Requests
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Students requesting new work. Click "Assign Beneficiaries" to assign via Manual Assignment.
+                  </p>
+                </div>
+              </div>
+
+              {assignmentRequests.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Users className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                  <p>No assignment requests</p>
+                  <p className="text-xs mt-1">Students with 0 assignments can request new work</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {assignmentRequests.map((request) => (
+                    <div
+                      key={request.id}
+                      className="border-2 border-blue-200 dark:border-blue-900 rounded-lg p-4 bg-blue-50 dark:bg-blue-950/20 hover:bg-blue-100 dark:hover:bg-blue-950/30 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className="p-2 rounded-lg bg-blue-500/20">
+                              <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                            </div>
+                            <div>
+                              <p className="font-medium text-foreground">
+                                {request.student_name}
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                TR: {request.student_tr_number}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="grid md:grid-cols-3 gap-3 mt-3 text-sm">
+                            <div>
+                              <p className="text-muted-foreground text-xs">Event</p>
+                              <p className="font-medium text-foreground mt-0.5">
+                                {request.event_tag || "Any event"}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground text-xs">Current Assignments</p>
+                              <p className="font-medium text-blue-600 mt-0.5">
+                                {request.current_assignments}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground text-xs">Requested</p>
+                              <p className="font-medium text-foreground mt-0.5">
+                                {new Date(request.created_at).toLocaleDateString()}
+                              </p>
+                            </div>
+                          </div>
+
+                          {request.reason && (
+                            <div className="mt-3 p-3 bg-muted rounded-md">
+                              <p className="text-xs text-muted-foreground mb-1">Note:</p>
+                              <p className="text-sm text-foreground">{request.reason}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          <Button
+                            onClick={async () => {
+                              // First, fetch students and open Manual Assignment
+                              setLoading(true);
+                              try {
+                                // Fetch current event setting
+                                const { data: eventData } = await supabase
+                                  .from("app_settings")
+                                  .select("setting_value")
+                                  .eq("setting_key", "current_event_for_availability")
+                                  .single();
+                                
+                                if (eventData) {
+                                  setCurrentEventForAssign(eventData.setting_value || "");
+                                }
+
+                                // Fetch existing event tags from assignments
+                                const { data: eventTagsData } = await supabase
+                                  .from("assignments")
+                                  .select("event_tag")
+                                  .not("event_tag", "is", null);
+                                
+                                // Get unique event tags and sort them
+                                const uniqueTags = [...new Set(eventTagsData?.map(a => a.event_tag) || [])];
+                                setExistingEventTags(uniqueTags.sort());
+                                
+                                // Set default selection to current event if it exists
+                                if (eventData?.setting_value && uniqueTags.includes(eventData.setting_value)) {
+                                  setSelectedEventTag(eventData.setting_value);
+                                } else if (uniqueTags.length > 0) {
+                                  setSelectedEventTag(uniqueTags[0]);
+                                }
+
+                                // Fetch all active students
+                                const { data: students } = await supabase
+                                  .from("students")
+                                  .select("tr_number, name, branch, available_in_mumbai")
+                                  .eq("is_active", true)
+                                  .order("available_in_mumbai", { ascending: false })
+                                  .order("name");
+                                
+                                setAvailableStudents(students || []);
+                                
+                                // Pre-select ONLY the student who made the request
+                                setSelectedStudents(new Set([request.student_tr_number]));
+                                
+                                // Switch to Actions tab
+                                const actionsTab = document.querySelector('[value="actions"]') as HTMLElement;
+                                if (actionsTab) {
+                                  actionsTab.click();
+                                }
+                                
+                                // Open Manual Assignment
+                                setShowManualAssign(true);
+                                
+                                toast.success(`Manual Assignment opened for ${request.student_name}. Select event tag and assign beneficiaries.`);
+                              } catch (err) {
+                                console.error(err);
+                                toast.error("Failed to open Manual Assignment");
+                              } finally {
+                                setLoading(false);
+                              }
+                            }}
+                            size="sm"
+                            className="bg-blue-600 hover:bg-blue-700"
+                          >
+                            <Users className="w-4 h-4 mr-2" />
+                            Assign Beneficiaries
+                          </Button>
+                          <Button
+                            onClick={() => {
+                              if (confirm(`Reject request from ${request.student_name}?\n\nStudent will be able to resubmit after 24 hours.`)) {
+                                revertAssignmentRequest(request.id);
+                              }
+                            }}
+                            disabled={processingRequest === request.id}
+                            variant="outline"
+                            size="sm"
+                          >
+                            {processingRequest === request.id ? (
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            ) : (
+                              <X className="w-4 h-4 mr-2" />
+                            )}
+                            Reject
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Unassignment Requests */}
+            <div className="card-elevated p-6 border-2 border-orange-500">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="font-serif text-xl mb-1">Unassignment Requests</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Students requesting to unassign their pending work
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={fetchUnassignmentRequests}
+                  disabled={loading}
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Refresh
+                </Button>
+              </div>
+
+              {unassignmentRequests.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <RefreshCw className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                  <p>No pending requests</p>
+                  <p className="text-xs mt-1">Students can request unassignment when they're not available in Mumbai</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {unassignmentRequests.map((request) => (
+                    <div
+                      key={request.id}
+                      className="border border-border rounded-lg p-4 bg-card hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className="p-2 rounded-lg bg-orange-500/10">
+                              <Users className="w-5 h-5 text-orange-600" />
+                            </div>
+                            <div>
+                              <p className="font-medium text-foreground">
+                                {request.student_name}
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                TR: {request.student_tr_number}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="grid md:grid-cols-3 gap-3 mt-3 text-sm">
+                            <div>
+                              <p className="text-muted-foreground text-xs">Event</p>
+                              <p className="font-medium text-foreground mt-0.5">
+                                {request.event_tag || "All events"}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground text-xs">Pending Assignments</p>
+                              <p className="font-medium text-orange-600 mt-0.5">
+                                {request.pending_count}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground text-xs">Requested</p>
+                              <p className="font-medium text-foreground mt-0.5">
+                                {new Date(request.created_at).toLocaleDateString()}
+                              </p>
+                            </div>
+                          </div>
+
+                          {request.reason && (
+                            <div className="mt-3 p-3 bg-muted rounded-md">
+                              <p className="text-xs text-muted-foreground mb-1">Reason:</p>
+                              <p className="text-sm text-foreground">{request.reason}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          <Button
+                            onClick={() => {
+                              if (confirm(`Approve request from ${request.student_name}?\n\nThis will unassign ${request.pending_count} pending assignments.\n\nContinue?`)) {
+                                approveUnassignmentRequest(request.id, request.student_tr_number, request.event_tag);
+                              }
+                            }}
+                            disabled={processingRequest === request.id}
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700"
+                          >
+                            {processingRequest === request.id ? (
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            ) : (
+                              <Check className="w-4 h-4 mr-2" />
+                            )}
+                            Approve
+                          </Button>
+                          <Button
+                            onClick={() => {
+                              if (confirm(`Reject request from ${request.student_name}?`)) {
+                                rejectUnassignmentRequest(request.id);
+                              }
+                            }}
+                            disabled={processingRequest === request.id}
+                            variant="destructive"
+                            size="sm"
+                          >
+                            {processingRequest === request.id ? (
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            ) : (
+                              <X className="w-4 h-4 mr-2" />
+                            )}
+                            Reject
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </TabsContent>
         </Tabs>

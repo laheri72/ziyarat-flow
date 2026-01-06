@@ -18,6 +18,7 @@ import {
   Pencil,
   List,
   AlignJustify,
+  Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -29,6 +30,15 @@ export default function Dashboard() {
   const [currentEvent, setCurrentEvent] = useState("");
   const [loadingAvailability, setLoadingAvailability] = useState(false);
   const [compactMode, setCompactMode] = useState(false);
+  const [needsAvailabilitySelection, setNeedsAvailabilitySelection] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [whatsappTemplate, setWhatsappTemplate] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [requestingUnassignment, setRequestingUnassignment] = useState(false);
+  const [hasActiveRequest, setHasActiveRequest] = useState(false);
+  const [requestingAssignment, setRequestingAssignment] = useState(false);
+  const [hasActiveAssignmentRequest, setHasActiveAssignmentRequest] = useState(false);
   
   // Pull-to-refresh state
   const [pullToRefreshActive, setPullToRefreshActive] = useState(false);
@@ -55,6 +65,9 @@ export default function Dashboard() {
     setSession(s);
     fetchAvailabilityStatus(s.tr_number);
     fetchCurrentEvent();
+    fetchMessageTemplates();
+    checkActiveUnassignmentRequest(s.tr_number);
+    checkActiveAssignmentRequest(s.tr_number);
   }, [navigate]);
 
   // Pull-to-refresh handlers
@@ -113,16 +126,164 @@ export default function Dashboard() {
     }
   };
 
+  const fetchMessageTemplates = async () => {
+    const [whatsapp, emailSubj, emailBod] = await Promise.all([
+      supabase.from("app_settings").select("setting_value").eq("setting_key", "whatsapp_message_template").single(),
+      supabase.from("app_settings").select("setting_value").eq("setting_key", "email_message_subject").single(),
+      supabase.from("app_settings").select("setting_value").eq("setting_key", "email_message_body").single(),
+    ]);
+
+    setWhatsappTemplate(whatsapp.data?.setting_value || "Afzal Us Salam\n\nKem cho?\n\nHame Darajah 11 1449H batch che from Al Jamea tus Saifiyah.\n\nSyedna Taher Saifuddin Aqa RA na Urus Mubarak na Ayyam ma hame ye aapna taraf si naam lai ne Rauzat Tahera ma bewe Moula ni zyarat kidi che.\n\nThis amal has been done as a part of khidmat from HadiAshar 1449 batch.\n\nKhuda sagla mumineen ne Rauzat Tahera ni zyarat naseeb kare.\n\nWasalaam");
+    setEmailSubject(emailSubj.data?.setting_value || "Ziyarat Khidmat - Rawdat Tahera");
+    setEmailBody(emailBod.data?.setting_value || "Afzal Us Salam\n\nKem cho?\n\nHame ye Syedna Taher Saifuddin Aqa RA na Urus Mubarak na Ayyam ma aapna taraf si naam lai ne Rauzat Tahera ma bewe Moula ni zyarat kidi che.\n\nThis amal has been done as a part of khidmat from HadiAshar 1449 batch.\n\nKhuda sagla mumineen ne Rauzat Tahera ni zyarat naseeb kare.\n\nWasalaam");
+  };
+
+  const checkActiveUnassignmentRequest = async (trNumber: string) => {
+    const { data } = await supabase
+      .from("unassignment_requests")
+      .select("id")
+      .eq("student_tr_number", trNumber)
+      .eq("status", "pending")
+      .single();
+    
+    setHasActiveRequest(!!data);
+  };
+
+  const requestUnassignment = async () => {
+    if (!session || !currentEvent) return;
+    
+    if (!confirm(`Request to unassign your pending work for "${currentEvent}"?\n\nThis will:\n- Notify admin to remove your pending assignments\n- Keep your completed work\n- Free up beneficiaries for reassignment\n\nContinue?`)) {
+      return;
+    }
+
+    setRequestingUnassignment(true);
+    try {
+      const { error } = await supabase
+        .from("unassignment_requests")
+        .insert({
+          student_tr_number: session.tr_number,
+          event_tag: currentEvent,
+          reason: "Not available in Mumbai",
+        });
+
+      if (error) throw error;
+
+      setHasActiveRequest(true);
+      toast.success("✅ Request submitted! Admin will process it soon.");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to submit request");
+    } finally {
+      setRequestingUnassignment(false);
+    }
+  };
+
+  const checkActiveAssignmentRequest = async (trNumber: string) => {
+    if (!currentEvent) return;
+    
+    // Check for active request (pending OR rejected within 24h) for the CURRENT event only
+    const yesterday = new Date();
+    yesterday.setHours(yesterday.getHours() - 24);
+    
+    const { data } = await supabase
+      .from("assignment_requests")
+      .select("id, status, created_at")
+      .eq("student_tr_number", trNumber)
+      .eq("event_tag", currentEvent)
+      .in("status", ["pending", "rejected"])
+      .gte("created_at", yesterday.toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    // If there's a pending or recent rejected request for THIS event, show cancel option
+    setHasActiveAssignmentRequest(!!data);
+  };
+
+  const requestAssignment = async () => {
+    if (!session || !currentEvent) return;
+    
+    if (!confirm(`Request new assignments for "${currentEvent}"?\n\nThis will:\n- Notify admin to assign beneficiaries to you\n- Admin will manually assign available beneficiaries\n\nContinue?`)) {
+      return;
+    }
+
+    setRequestingAssignment(true);
+    try {
+      // First, delete any existing requests to prevent duplicates
+      console.log("🗑️ Cleaning up any existing requests before creating new one...");
+      await supabase
+        .from("assignment_requests")
+        .delete()
+        .eq("student_tr_number", session.tr_number)
+        .eq("event_tag", currentEvent);
+
+      // Now insert the new request
+      const { error } = await supabase
+        .from("assignment_requests")
+        .insert({
+          student_tr_number: session.tr_number,
+          event_tag: currentEvent,
+          reason: "Available and ready for assignments",
+        });
+
+      if (error) throw error;
+
+      setHasActiveAssignmentRequest(true);
+      toast.success("✅ Request submitted! Admin will assign beneficiaries soon.");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to submit request");
+    } finally {
+      setRequestingAssignment(false);
+    }
+  };
+
+  const cancelAssignmentRequest = async () => {
+    if (!session || !currentEvent) return;
+    
+    if (!confirm(`Cancel your assignment request for "${currentEvent}"?\n\nThis will remove your pending request and allow you to submit a new one.`)) {
+      return;
+    }
+
+    setRequestingAssignment(true);
+    try {
+      console.log("🗑️ Cancelling all requests for:", { tr: session.tr_number, event: currentEvent });
+      
+      const { data, error } = await supabase
+        .from("assignment_requests")
+        .delete()
+        .eq("student_tr_number", session.tr_number)
+        .eq("event_tag", currentEvent)
+        .select();
+
+      if (error) throw error;
+
+      console.log("✅ Deleted requests:", data?.length || 0, data);
+      
+      setHasActiveAssignmentRequest(false);
+      toast.success(`Request cancelled. ${data?.length || 0} request(s) removed.`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to cancel request");
+    } finally {
+      setRequestingAssignment(false);
+    }
+  };
+
   const fetchAvailabilityStatus = async (trNumber: string) => {
     const { data } = await supabase
       .from("students")
-      .select("available_in_mumbai")
+      .select("available_in_mumbai, availability_updated_at")
       .eq("tr_number", trNumber)
       .single();
     
     if (data) {
-      setAvailableInMumbai(data.available_in_mumbai || false);
+      const isAvailable = data.available_in_mumbai === true;
+      setAvailableInMumbai(isAvailable);
+      // Show modal for anyone who is NOT available (including first-time users)
+      setNeedsAvailabilitySelection(!isAvailable);
     }
+    setIsInitialLoad(false);
   };
 
   const toggleAvailability = async () => {
@@ -143,6 +304,7 @@ export default function Dashboard() {
       if (error) throw error;
 
       setAvailableInMumbai(newStatus);
+      setNeedsAvailabilitySelection(false);
       toast.success(
         newStatus
           ? "✅ Marked as available in Mumbai"
@@ -208,10 +370,123 @@ export default function Dashboard() {
     toast.success("Downloaded CSV");
   };
 
-  if (!session || loading) {
+  if (!session || loading || isInitialLoad) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  // Force availability selection modal
+  if (needsAvailabilitySelection && currentEvent) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="card-elevated p-6 space-y-6">
+            <div className="text-center space-y-2">
+              <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                <MapPin className="w-8 h-8 text-primary" />
+              </div>
+              <h2 className="font-serif text-2xl text-foreground">Welcome, {session.name}!</h2>
+              <p className="text-sm text-muted-foreground">
+                Before you begin, please let us know your availability
+              </p>
+            </div>
+
+            <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+              <p className="text-sm font-medium text-foreground">
+                📍 Event: <span className="text-primary">{currentEvent}</span>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                This helps us assign beneficiaries to students who are available in Mumbai
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <Button
+                onClick={async () => {
+                  vibrate([50, 50, 100]);
+                  setLoadingAvailability(true);
+                  try {
+                    const { error } = await supabase
+                      .from("students")
+                      .update({
+                        available_in_mumbai: true,
+                        availability_updated_at: new Date().toISOString(),
+                      })
+                      .eq("tr_number", session.tr_number);
+
+                    if (error) throw error;
+
+                    setAvailableInMumbai(true);
+                    setNeedsAvailabilitySelection(false);
+                    toast.success("✅ Marked as available in Mumbai");
+                  } catch (err) {
+                    console.error(err);
+                    toast.error("Failed to update availability");
+                  } finally {
+                    setLoadingAvailability(false);
+                  }
+                }}
+                disabled={loadingAvailability}
+                className="w-full h-14 text-base bg-green-500 hover:bg-green-600 text-white"
+              >
+                {loadingAvailability ? (
+                  <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />
+                ) : (
+                  <>
+                    <MapPin className="w-5 h-5 mr-2" />
+                    ✅ I am available in Mumbai
+                  </>
+                )}
+              </Button>
+
+              <Button
+                onClick={async () => {
+                  vibrate(50);
+                  setLoadingAvailability(true);
+                  try {
+                    const { error } = await supabase
+                      .from("students")
+                      .update({
+                        available_in_mumbai: false,
+                        availability_updated_at: new Date().toISOString(),
+                      })
+                      .eq("tr_number", session.tr_number);
+
+                    if (error) throw error;
+
+                    setAvailableInMumbai(false);
+                    setNeedsAvailabilitySelection(false);
+                    toast.success("❌ Marked as not available in Mumbai");
+                  } catch (err) {
+                    console.error(err);
+                    toast.error("Failed to update availability");
+                  } finally {
+                    setLoadingAvailability(false);
+                  }
+                }}
+                disabled={loadingAvailability}
+                variant="outline"
+                className="w-full h-14 text-base border-2"
+              >
+                {loadingAvailability ? (
+                  <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
+                ) : (
+                  <>
+                    <X className="w-5 h-5 mr-2" />
+                    ❌ Not available in Mumbai
+                  </>
+                )}
+              </Button>
+            </div>
+
+            <p className="text-xs text-center text-muted-foreground">
+              You can change this later from your dashboard
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -313,32 +588,78 @@ export default function Dashboard() {
               </div>
             ) : (
               /* Full Toggle Card - When Not Available */
-              <div className="card-elevated p-4 transition-all">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 flex-1">
-                    <div className="p-2 rounded-lg bg-muted">
-                      <MapPin className="w-5 h-5 text-muted-foreground" />
+              <div className="space-y-3">
+                <div className="card-elevated p-4 transition-all">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 flex-1">
+                      <div className="p-2 rounded-lg bg-muted">
+                        <MapPin className="w-5 h-5 text-muted-foreground" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-medium text-sm text-foreground">
+                          Are you available in Mumbai?
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          For: <span className="font-medium">{currentEvent}</span>
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex-1">
-                      <p className="font-medium text-sm text-foreground">
-                        Are you available in Mumbai?
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        For: <span className="font-medium">{currentEvent}</span>
-                      </p>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-medium text-muted-foreground">
+                        Not Available
+                      </span>
+                      <Switch
+                        checked={availableInMumbai}
+                        onCheckedChange={toggleAvailability}
+                        disabled={loadingAvailability}
+                      />
                     </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-medium text-muted-foreground">
-                      Not Available
-                    </span>
-                    <Switch
-                      checked={availableInMumbai}
-                      onCheckedChange={toggleAvailability}
-                      disabled={loadingAvailability}
-                    />
                   </div>
                 </div>
+
+                {/* Unassignment Request Card */}
+                {totalCount > completedCount && (
+                  <div className="card-elevated p-4 bg-orange-50 dark:bg-orange-950/20 border-2 border-orange-200 dark:border-orange-900">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="p-2 rounded-lg bg-orange-500/20">
+                        <RefreshCw className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-medium text-sm text-orange-900 dark:text-orange-100">
+                          Unable to complete assignments?
+                        </p>
+                        <p className="text-xs text-orange-700 dark:text-orange-300 mt-0.5">
+                          {totalCount - completedCount} pending assignments for {currentEvent}
+                        </p>
+                      </div>
+                    </div>
+                    {hasActiveRequest ? (
+                      <div className="bg-white dark:bg-orange-950/50 rounded-md p-3 border border-orange-300 dark:border-orange-800">
+                        <p className="text-sm text-orange-900 dark:text-orange-200 font-medium">
+                          ✅ Request Submitted
+                        </p>
+                        <p className="text-xs text-orange-700 dark:text-orange-400 mt-1">
+                          Admin will process your unassignment request soon.
+                        </p>
+                      </div>
+                    ) : (
+                      <Button
+                        onClick={requestUnassignment}
+                        disabled={requestingUnassignment}
+                        variant="outline"
+                        className="w-full border-orange-500 text-orange-600 hover:bg-orange-100 dark:hover:bg-orange-950"
+                        size="sm"
+                      >
+                        {requestingUnassignment ? (
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          <X className="w-4 h-4 mr-2" />
+                        )}
+                        Request to Unassign Pending Work
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -389,10 +710,71 @@ export default function Dashboard() {
       <main className="flex-1 py-4 px-4">
         <div className="container max-w-4xl mx-auto">
           {filteredAssignments.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              {searchQuery
-                ? "No matching records found"
-                : "No assignments yet. Please contact admin."}
+            <div className="space-y-4">
+              <div className="text-center py-8 text-muted-foreground">
+                {searchQuery
+                  ? "No matching records found"
+                  : "No assignments yet"}
+              </div>
+              
+              {/* Assignment Request Card - shown when 0 assignments and no search */}
+              {!searchQuery && currentEvent && (
+                <div className="card-elevated p-6 bg-blue-50 dark:bg-blue-950/20 border-2 border-blue-200 dark:border-blue-900 max-w-lg mx-auto">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="p-3 rounded-lg bg-blue-500/20">
+                      <Users className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-medium text-blue-900 dark:text-blue-100">
+                        Ready for Ziyarat?
+                      </p>
+                      <p className="text-sm text-blue-700 dark:text-blue-300 mt-0.5">
+                        Request Names  for {currentEvent}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {hasActiveAssignmentRequest ? (
+                    <div className="space-y-2">
+                      <div className="bg-white dark:bg-blue-950/50 rounded-md p-3 border border-blue-300 dark:border-blue-800">
+                        <p className="text-sm text-blue-900 dark:text-blue-200 font-medium">
+                          ✅ Request Already Submitted
+                        </p>
+                        <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
+                          Admin will process your request soon.
+                        </p>
+                      </div>
+                      <Button
+                        onClick={cancelAssignmentRequest}
+                        disabled={requestingAssignment}
+                        variant="outline"
+                        className="w-full border-blue-500 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-950"
+                        size="sm"
+                      >
+                        {requestingAssignment ? (
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          <X className="w-4 h-4 mr-2" />
+                        )}
+                        Cancel Request
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      onClick={requestAssignment}
+                      disabled={requestingAssignment}
+                      className="w-full bg-blue-600 hover:bg-blue-700"
+                    >
+                      {requestingAssignment ? (
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <Users className="w-4 h-4 mr-2" />
+                      )}
+                      Request New Assignments
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-1.5">
@@ -402,6 +784,9 @@ export default function Dashboard() {
                   assignment={assignment}
                   onToggle={toggleStatus}
                   compactMode={compactMode}
+                  whatsappTemplate={whatsappTemplate}
+                  emailSubject={emailSubject}
+                  emailBody={emailBody}
                 />
               ))}
             </div>
@@ -416,10 +801,16 @@ function AssignmentRow({
   assignment,
   onToggle,
   compactMode = false,
+  whatsappTemplate = "",
+  emailSubject = "",
+  emailBody = "",
 }: {
   assignment: Assignment;
   onToggle: (id: string, status: "pending" | "completed") => void;
   compactMode?: boolean;
+  whatsappTemplate?: string;
+  emailSubject?: string;
+  emailBody?: string;
 }) {
   const isCompleted = assignment.status === "completed";
   const hasEmail = assignment.beneficiary.email;
@@ -446,9 +837,7 @@ function AssignmentRow({
   // Format mobile number for WhatsApp (remove + and spaces)
   const getWhatsAppLink = (mobile: string) => {
     const cleanNumber = mobile.replace(/[^0-9]/g, '');
-    const message = encodeURIComponent(
-      `Afzal Us Salam\n\nKem cho?\n\nHame ye Syedna Taher Saifuddin Aqa RA na Urus Mubarak na Ayyam ma aapna taraf si naam lai ne Rauzat Tahera ma bewe Moula ni zyarat kidi che.\n\nThis amal has been done as a part of khidmat from HadiAshar 1449 batch.\n\nKhuda sagla mumineen ne Rauzat Tahera ni zyarat naseeb kare.\n\nWasalaam`
-    );
+    const message = encodeURIComponent(whatsappTemplate || "Afzal Us Salam\n\nKem cho?\n\nHame Darajah 11 1449H batch che from Al Jamea tus Saifiyah.\n\nSyedna Taher Saifuddin Aqa RA na Urus Mubarak na Ayyam ma hame ye aapna taraf si naam lai ne Rauzat Tahera ma bewe Moula ni zyarat kidi che.\n\nThis amal has been done as a part of khidmat from HadiAshar 1449 batch.\n\nKhuda sagla mumineen ne Rauzat Tahera ni zyarat naseeb kare.\n\nWasalaam");
     return `https://wa.me/${cleanNumber}?text=${message}`;
   };
 
@@ -498,14 +887,14 @@ function AssignmentRow({
               </a>
             )}
             {hasEmail && (
-              <a
-                href={`mailto:${assignment.beneficiary.email}?subject=Ziyarat Khidmat - Rawdat Tahera&body=Afzal Us Salam%0D%0A%0D%0AKem cho?%0D%0A%0D%0AHame ye Syedna Taher Saifuddin Aqa RA na Urus Mubarak na Ayyam ma aapna taraf si naam lai ne Rauzat Tahera ma bewe Moula ni zyarat kidi che.%0D%0A%0D%0AThis amal has been done as a part of khidmat from HadiAshar 1449 batch.%0D%0A%0D%0AKhuda sagla mumineen ne Rauzat Tahera ni zyarat naseeb kare.%0D%0A%0D%0AWasalaam`}
+                <a
+                href={`mailto:${assignment.beneficiary.email}?subject=${encodeURIComponent(emailSubject || "Ziyarat Khidmat - Rawdat Tahera")}&body=${encodeURIComponent(emailBody || "Afzal Us Salam\n\nKem cho?\n\nHame ye Syedna Taher Saifuddin Aqa RA na Urus Mubarak na Ayyam ma aapna taraf si naam lai ne Rauzat Tahera ma bewe Moula ni zyarat kidi che.\n\nThis amal has been done as a part of khidmat from HadiAshar 1449 batch.\n\nKhuda sagla mumineen ne Rauzat Tahera ni zyarat naseeb kare.\n\nWasalaam")}`}
                 onClick={() => vibrate(50)}
                 className="p-1 hover:bg-blue-500/20 rounded active:scale-95"
                 title={assignment.beneficiary.email}
-              >
+                >
                 <span className="text-xs">✉️</span>
-              </a>
+                </a>
             )}
           </div>
         )}
@@ -599,7 +988,7 @@ function AssignmentRow({
             {hasEmail && (
               <div className="flex items-center gap-2">
                 <a
-                  href={`mailto:${assignment.beneficiary.email}?subject=Ziyarat Khidmat - Rawdat Tahera&body=Afzal Us Salam%0D%0A%0D%0AKem cho?%0D%0A%0D%0AHame ye Syedna Taher Saifuddin Aqa RA na Urus Mubarak na Ayyam ma aapna taraf si naam lai ne Rauzat Tahera ma bewe Moula ni zyarat kidi che.%0D%0A%0D%0AThis amal has been done as a part of khidmat from HadiAshar 1449 batch.%0D%0A%0D%0AKhuda sagla mumineen ne Rauzat Tahera ni zyarat naseeb kare.%0D%0A%0D%0AWasalaam`}
+                  href={`mailto:${assignment.beneficiary.email}?subject=${encodeURIComponent(emailSubject || "Ziyarat Khidmat - Rawdat Tahera")}&body=${encodeURIComponent(emailBody || "Afzal Us Salam\n\nKem cho?\n\nHame ye Syedna Taher Saifuddin Aqa RA na Urus Mubarak na Ayyam ma aapna taraf si naam lai ne Rauzat Tahera ma bewe Moula ni zyarat kidi che.\n\nThis amal has been done as a part of khidmat from HadiAshar 1449 batch.\n\nKhuda sagla mumineen ne Rauzat Tahera ni zyarat naseeb kare.\n\nWasalaam")}`}
                   onClick={() => vibrate(50)}
                   className="flex-1 px-3 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-700 dark:text-blue-300 rounded-md text-sm transition-colors flex items-center gap-2 font-medium"
                 >
