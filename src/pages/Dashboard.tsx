@@ -303,6 +303,66 @@ export default function Dashboard() {
     a.localeCompare(b)
   );
 
+  const hasCurrentEventAssignments =
+    !!currentEvent && assignments.some((a) => a.event_tag === currentEvent);
+
+  const assignmentRequestCard = currentEvent ? (
+    <div className="card-elevated p-6 bg-blue-50 dark:bg-blue-950/20 border-2 border-blue-200 dark:border-blue-900 max-w-lg mx-auto">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="p-3 rounded-lg bg-blue-500/20">
+          <Users className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+        </div>
+        <div className="flex-1">
+          <p className="font-medium text-blue-900 dark:text-blue-100">
+            Ready for Ziyarat?
+          </p>
+          <p className="text-sm text-blue-700 dark:text-blue-300 mt-0.5">
+            Request Names for {currentEvent}
+          </p>
+        </div>
+      </div>
+      {hasActiveAssignmentRequest ? (
+        <div className="space-y-2">
+          <div className="bg-white dark:bg-blue-950/50 rounded-md p-3 border border-blue-300 dark:border-blue-800">
+            <p className="text-sm text-blue-900 dark:text-blue-200 font-medium">
+              âœ… Request Already Submitted
+            </p>
+            <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
+              Admin will process your request soon.
+            </p>
+          </div>
+          <Button
+            onClick={cancelAssignmentRequest}
+            disabled={requestingAssignment}
+            variant="outline"
+            className="w-full border-blue-500 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-950"
+            size="sm"
+          >
+            {requestingAssignment ? (
+              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <X className="w-4 h-4 mr-2" />
+            )}
+            Cancel Request
+          </Button>
+        </div>
+      ) : (
+        <Button
+          onClick={requestAssignment}
+          disabled={requestingAssignment}
+          className="w-full bg-blue-600 hover:bg-blue-700"
+        >
+          {requestingAssignment ? (
+            <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <Users className="w-4 h-4 mr-2" />
+          )}
+          Request New Assignments
+        </Button>
+      )}
+    </div>
+  ) : null;
+
   const copyToClipboard = () => {
     const text = assignments
       .map(
@@ -501,28 +561,51 @@ export default function Dashboard() {
           <div className="container max-w-4xl mx-auto">
             {availableInMumbai ? (
               /* Compact Green Card - When Available */
-              <div className="bg-gradient-to-r from-green-50 to-green-100 dark:from-green-950/30 dark:to-green-950/20 border-2 border-green-300 dark:border-green-800 rounded-lg p-3 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 flex-1">
-                  <div className="p-2 rounded-full bg-green-500/20">
-                    <MapPin className="w-4 h-4 text-green-600 dark:text-green-400" />
+              <div className="space-y-3">
+                <div className="bg-gradient-to-r from-green-50 to-green-100 dark:from-green-950/30 dark:to-green-950/20 border-2 border-green-300 dark:border-green-800 rounded-lg p-3 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 flex-1">
+                    <div className="p-2 rounded-full bg-green-500/20">
+                      <MapPin className="w-4 h-4 text-green-600 dark:text-green-400" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-xs text-green-700 dark:text-green-400 font-medium">
+                        ✅ Available in Mumbai for
+                      </p>
+                      <p className="font-bold text-sm text-green-900 dark:text-green-300">
+                        {currentEvent}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <p className="text-xs text-green-700 dark:text-green-400 font-medium">
-                      ✅ Available in Mumbai for
-                    </p>
-                    <p className="font-bold text-sm text-green-900 dark:text-green-300">
-                      {currentEvent}
-                    </p>
-                  </div>
+                  <button
+                    onClick={toggleAvailability}
+                    disabled={loadingAvailability}
+                    className="p-2 rounded-full hover:bg-green-200/50 dark:hover:bg-green-900/30 transition-colors"
+                    title="Edit availability"
+                  >
+                    <Pencil className="w-3.5 h-3.5 text-green-700 dark:text-green-400" />
+                  </button>
                 </div>
-                <button
-                  onClick={toggleAvailability}
-                  disabled={loadingAvailability}
-                  className="p-2 rounded-full hover:bg-green-200/50 dark:hover:bg-green-900/30 transition-colors"
-                  title="Edit availability"
-                >
-                  <Pencil className="w-3.5 h-3.5 text-green-700 dark:text-green-400" />
-                </button>
+
+                {!hasCurrentEventAssignments && (
+                  <>
+                    <div className="card-elevated p-4 bg-emerald-50 dark:bg-emerald-950/20 border-2 border-emerald-200 dark:border-emerald-900">
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-lg bg-emerald-500/20">
+                          <Users className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-medium text-sm text-emerald-900 dark:text-emerald-100">
+                            You are marked available in Mumbai for {currentEvent}.
+                          </p>
+                          <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
+                            Admin will assign beneficiary names shortly. Thank you for confirming your availability.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    {assignmentRequestCard}
+                  </>
+                )}
               </div>
             ) : (
               /* Full Toggle Card - When Not Available */
@@ -967,3 +1050,6 @@ function AssignmentRow({
     </div>
   );
 }
+
+
+
