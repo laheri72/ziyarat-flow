@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Inter:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -7,8 +9,6 @@
   A calm, respectful, minimal aesthetic for religious khidmat
   Colors inspired by: earthy tones, muted greens, warm neutrals
 */
-
-@import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Inter:wght@400;500;600;700&display=swap');
 
 @layer base {
   /* Mobile app-like behavior */
@@ -20,12 +20,11 @@
   html {
     overflow-x: hidden;
     -webkit-text-size-adjust: 100%;
-    touch-action: manipulation;
+    touch-action: pan-y;
   }
 
   body {
     overflow-x: hidden;
-    overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
   }
 

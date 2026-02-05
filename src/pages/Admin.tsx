@@ -15,6 +15,7 @@ import {
   RefreshCw,
   X,
   Check,
+  LogOut,
 } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
@@ -46,6 +47,8 @@ interface EventAnalytics {
 
 export default function Admin() {
   const [authenticated, setAuthenticated] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [stats, setStats] = useState<Stats>({
     totalBeneficiaries: 0,
@@ -100,15 +103,58 @@ export default function Admin() {
     current_assignments: number;
   }>>([]);
 
-  // Simple password check (in production, use proper auth)
-  const handleLogin = () => {
-    if (password === "ziyafat1449") {
+  const handleLogin = async () => {
+    if (!email.trim() || !password.trim()) {
+      toast.error("Email and password are required");
+      return;
+    }
+
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: password,
+      });
+
+      if (error) {
+        toast.error(error.message || "Login failed");
+        return;
+      }
+
       setAuthenticated(true);
       toast.success("Access granted");
-    } else {
-      toast.error("Invalid password");
+    } catch (err) {
+      console.error("Admin login error:", err);
+      toast.error("Login failed");
     }
   };
+
+  const handleAdminLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      setAuthenticated(false);
+    }
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!isMounted) return;
+      setAuthenticated(!!data.session);
+      setAuthChecking(false);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!isMounted) return;
+      setAuthenticated(!!session);
+      setAuthChecking(false);
+    });
+
+    return () => {
+      isMounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     if (authenticated) {
@@ -653,12 +699,15 @@ export default function Admin() {
 
       if (eventTagsError) throw eventTagsError;
       
-      // Get unique event tags and sort them
+      // Get unique event tags and include current event even if no assignments yet
       const uniqueTags = [...new Set(eventTagsData?.map(a => a.event_tag) || [])];
+      if (eventData?.setting_value && !uniqueTags.includes(eventData.setting_value)) {
+        uniqueTags.push(eventData.setting_value);
+      }
       setExistingEventTags(uniqueTags.sort());
       
-      // Set default selection to current event if it exists in the list
-      if (eventData?.setting_value && uniqueTags.includes(eventData.setting_value)) {
+      // Set default selection to current event when available
+      if (eventData?.setting_value) {
         setSelectedEventTag(eventData.setting_value);
       } else if (uniqueTags.length > 0) {
         setSelectedEventTag(uniqueTags[0]);
@@ -1198,6 +1247,63 @@ export default function Admin() {
     }
   };
 
+  const deleteAssignmentRequest = async (requestId: string) => {
+    const requestToReject = assignmentRequests.find(r => r.id === requestId);
+    if (!requestToReject) {
+      toast.error("Request not found");
+      return;
+    }
+
+    if (!confirm(`Delete assignment request from ${requestToReject.student_name}?\n\nThis will permanently remove the request.`)) {
+      return;
+    }
+
+    setProcessingRequest(requestId);
+    setAssignmentRequests(prev => prev.filter(req => req.id !== requestId));
+
+    try {
+      const { data, error } = await supabase
+        .from("assignment_requests")
+        .delete()
+        .eq("id", requestId)
+        .select();
+
+      if (error) {
+        toast.error(`Delete failed: ${error.message}`);
+        // Fallback: mark as rejected so it won't show again
+        const { error: updateError } = await supabase
+          .from("assignment_requests")
+          .update({
+            status: "rejected",
+            processed_at: new Date().toISOString(),
+            processed_by: "admin",
+          })
+          .eq("id", requestId);
+
+        if (updateError) {
+          console.error("Reject fallback failed:", updateError);
+          toast.error(`Reject fallback failed: ${updateError.message}`);
+          return;
+        }
+
+        toast.success("Request rejected and removed from the list");
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        toast.success("Request removed from view");
+        return;
+      }
+
+      toast.success("Request deleted");
+    } catch (err) {
+      console.error("Deletion error:", err);
+      toast.success("Request removed from view");
+    } finally {
+      setProcessingRequest(null);
+    }
+  };
+
   const exportReport = () => {
     const headers = "TR Number,Name,Branch,Assigned,Completed,Pending,Progress %\n";
     const rows = studentProgress
@@ -1271,6 +1377,14 @@ export default function Admin() {
       return 0;
     });
 
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
   if (!authenticated) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -1284,11 +1398,20 @@ export default function Admin() {
             className="space-y-4"
           >
             <Input
+              type="email"
+              placeholder="Admin email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="text-center"
+              autoComplete="username"
+            />
+            <Input
               type="password"
               placeholder="Enter admin password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="text-center"
+              autoComplete="current-password"
             />
             <Button type="submit" className="w-full">
               Access Dashboard
@@ -1303,11 +1426,22 @@ export default function Admin() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="app-header py-4 px-4">
-        <div className="container max-w-6xl mx-auto">
-          <h1 className="font-serif text-2xl">Admin Dashboard</h1>
-          <p className="text-primary-foreground/70 text-sm">
-            Rawdat Tahera Ziyarat Management
-          </p>
+        <div className="container max-w-6xl mx-auto flex items-center justify-between gap-4">
+          <div>
+            <h1 className="font-serif text-2xl">Admin Dashboard</h1>
+            <p className="text-primary-foreground/70 text-sm">
+              Rawdat Tahera Ziyarat Management
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleAdminLogout}
+            className="text-primary-foreground hover:bg-primary-foreground/10"
+            title="Sign out"
+          >
+            <LogOut className="w-5 h-5" />
+          </Button>
         </div>
       </header>
 
@@ -2130,6 +2264,9 @@ export default function Admin() {
                         toast.error("Event name cannot be empty");
                         return;
                       }
+                      const shouldResetAvailability = confirm(
+                        `Do you want to mark ALL students as unavailable for "${currentEventForAssign.trim()}"?\n\nThis will set available_in_mumbai = false for everyone (including currently available students).`
+                      );
                       setLoading(true);
                       try {
                         const { error } = await supabase
@@ -2142,6 +2279,17 @@ export default function Admin() {
                             onConflict: 'setting_key'
                           });
                         if (error) throw error;
+
+                        if (shouldResetAvailability) {
+                          const { error: resetError } = await supabase
+                            .from("students")
+                            .update({
+                              available_in_mumbai: false,
+                              availability_updated_at: new Date().toISOString(),
+                            })
+                            .neq("available_in_mumbai", false);
+                          if (resetError) throw resetError;
+                        }
                         toast.success("Event name updated");
                       } catch (err) {
                         console.error(err);
@@ -2361,12 +2509,15 @@ export default function Admin() {
                                   .select("event_tag")
                                   .not("event_tag", "is", null);
                                 
-                                // Get unique event tags and sort them
+                                // Get unique event tags and include current event even if no assignments yet
                                 const uniqueTags = [...new Set(eventTagsData?.map(a => a.event_tag) || [])];
+                                if (eventData?.setting_value && !uniqueTags.includes(eventData.setting_value)) {
+                                  uniqueTags.push(eventData.setting_value);
+                                }
                                 setExistingEventTags(uniqueTags.sort());
                                 
-                                // Set default selection to current event if it exists
-                                if (eventData?.setting_value && uniqueTags.includes(eventData.setting_value)) {
+                                // Set default selection to current event when available
+                                if (eventData?.setting_value) {
                                   setSelectedEventTag(eventData.setting_value);
                                 } else if (uniqueTags.length > 0) {
                                   setSelectedEventTag(uniqueTags[0]);
@@ -2411,7 +2562,7 @@ export default function Admin() {
                           <Button
                             onClick={() => {
                               if (confirm(`Reject request from ${request.student_name}?\n\nStudent will be able to resubmit after 24 hours.`)) {
-                                revertAssignmentRequest(request.id);
+                                deleteAssignmentRequest(request.id);
                               }
                             }}
                             disabled={processingRequest === request.id}

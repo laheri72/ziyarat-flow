@@ -40,11 +40,6 @@ export default function Dashboard() {
   const [requestingAssignment, setRequestingAssignment] = useState(false);
   const [hasActiveAssignmentRequest, setHasActiveAssignmentRequest] = useState(false);
   
-  // Pull-to-refresh state
-  const [pullToRefreshActive, setPullToRefreshActive] = useState(false);
-  const [pullDistance, setPullDistance] = useState(0);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [touchStartY, setTouchStartY] = useState(0);
 
   const {
     assignments,
@@ -70,49 +65,6 @@ export default function Dashboard() {
     checkActiveAssignmentRequest(s.tr_number);
   }, [navigate]);
 
-  // Pull-to-refresh handlers
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (window.scrollY === 0 && !isRefreshing) {
-      setTouchStartY(e.touches[0].clientY);
-      setPullToRefreshActive(true);
-    }
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!pullToRefreshActive || isRefreshing) return;
-    
-    const touchY = e.touches[0].clientY;
-    const distance = touchY - touchStartY;
-    
-    if (distance > 0 && window.scrollY === 0) {
-      setPullDistance(Math.min(distance, 120));
-    }
-  };
-
-  const handleTouchEnd = async () => {
-    if (pullDistance > 80 && !isRefreshing) {
-      setIsRefreshing(true);
-      await handleRefresh();
-    }
-    setPullToRefreshActive(false);
-    setPullDistance(0);
-  };
-
-  const handleRefresh = async () => {
-    try {
-      await Promise.all([
-        refresh(),
-        fetchAvailabilityStatus(session?.tr_number || ""),
-        fetchCurrentEvent(),
-      ]);
-      toast.success("Refreshed!");
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to refresh");
-    } finally {
-      setTimeout(() => setIsRefreshing(false), 500);
-    }
-  };
 
   const fetchCurrentEvent = async () => {
     const { data } = await supabase
@@ -340,6 +292,17 @@ export default function Dashboard() {
     );
   });
 
+  const groupedAssignments = filteredAssignments.reduce((acc, assignment) => {
+    const tag = assignment.event_tag || "Untagged";
+    if (!acc[tag]) acc[tag] = [];
+    acc[tag].push(assignment);
+    return acc;
+  }, {} as Record<string, Assignment[]>);
+
+  const groupedEventTags = Object.keys(groupedAssignments).sort((a, b) =>
+    a.localeCompare(b)
+  );
+
   const copyToClipboard = () => {
     const text = assignments
       .map(
@@ -492,32 +455,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div 
-      className="min-h-screen bg-background flex flex-col"
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-    >
-      {/* Pull-to-Refresh Indicator */}
-      <div 
-        className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center transition-all duration-300 ease-out"
-        style={{
-          height: `${pullDistance}px`,
-          opacity: pullDistance > 0 ? 1 : 0,
-          pointerEvents: 'none',
-        }}
-      >
-        <div 
-          className="bg-primary/90 backdrop-blur-sm rounded-full p-3 shadow-lg transform transition-transform"
-          style={{
-            transform: `scale(${Math.min(pullDistance / 80, 1)}) rotate(${pullDistance * 3}deg)`,
-          }}
-        >
-          <RefreshCw 
-            className={`w-5 h-5 text-primary-foreground ${isRefreshing ? 'animate-spin' : ''}`}
-          />
-        </div>
-      </div>
+    <div className="min-h-screen bg-background flex flex-col">
 
       {/* Header */}
       <header className="app-header py-4 px-4 sticky top-0 z-10">
@@ -777,17 +715,31 @@ export default function Dashboard() {
               )}
             </div>
           ) : (
-            <div className="space-y-1.5">
-              {filteredAssignments.map((assignment) => (
-                <AssignmentRow
-                  key={assignment.id}
-                  assignment={assignment}
-                  onToggle={toggleStatus}
-                  compactMode={compactMode}
-                  whatsappTemplate={whatsappTemplate}
-                  emailSubject={emailSubject}
-                  emailBody={emailBody}
-                />
+            <div className="space-y-6">
+              {groupedEventTags.map((tag) => (
+                <section key={tag} className="card-elevated p-3">
+                  <div className="sticky top-[120px] z-10 -mx-3 px-3 py-2 bg-background/95 backdrop-blur border-b border-border rounded-t-lg flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-foreground">
+                      {tag}
+                    </h3>
+                    <span className="text-xs text-muted-foreground">
+                      {groupedAssignments[tag].length} total
+                    </span>
+                  </div>
+                  <div className="space-y-1.5 pt-3">
+                    {groupedAssignments[tag].map((assignment) => (
+                      <AssignmentRow
+                        key={assignment.id}
+                        assignment={assignment}
+                        onToggle={toggleStatus}
+                        compactMode={compactMode}
+                        whatsappTemplate={whatsappTemplate}
+                        emailSubject={emailSubject}
+                        emailBody={emailBody}
+                      />
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           )}
