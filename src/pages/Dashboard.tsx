@@ -151,40 +151,92 @@ export default function Dashboard() {
     // If there's a pending or recent rejected request for THIS event, show cancel option
     setHasActiveAssignmentRequest(!!data);
   };
-
   const requestAssignment = async () => {
     if (!session || !currentEvent) return;
-    
-    if (!confirm(`Request new assignments for "${currentEvent}"?\n\nThis will:\n- Notify admin to assign beneficiaries to you\n- Admin will manually assign available beneficiaries\n\nContinue?`)) {
+
+    if (!availableInMumbai) {
+      toast.error("Please mark yourself as available in Mumbai first.");
+      return;
+    }
+
+    if (!confirm(`Assign 10 new beneficiaries for "${currentEvent}" now?\n\nThis will:\n- Auto-assign up to 10 unassigned beneficiaries to you\n- Use the current event tag\n\nContinue?`)) {
       return;
     }
 
     setRequestingAssignment(true);
     try {
-      // First, delete any existing requests to prevent duplicates
-      console.log("🗑️ Cleaning up any existing requests before creating new one...");
-      await supabase
+      // Remove any old assignment requests for this event to avoid manual workflow
+      const { error: cleanupError } = await supabase
         .from("assignment_requests")
         .delete()
         .eq("student_tr_number", session.tr_number)
         .eq("event_tag", currentEvent);
+      if (cleanupError) {
+        console.warn("Failed to cleanup old assignment requests:", cleanupError);
+      }
 
-      // Now insert the new request
-      const { error } = await supabase
-        .from("assignment_requests")
-        .insert({
-          student_tr_number: session.tr_number,
-          event_tag: currentEvent,
-          reason: "Available and ready for assignments",
-        });
+      const assignedSet = new Set<string>();
+      const fetchBatchSize = 1000;
+      let offset = 0;
 
+      // Fetch ALL assignments to build assigned set
+      while (true) {
+        const { data, error } = await supabase
+          .from("assignments")
+          .select("beneficiary_its_id")
+          .order("beneficiary_its_id")
+          .range(offset, offset + fetchBatchSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+
+        data.forEach((a) => assignedSet.add(a.beneficiary_its_id));
+        offset += fetchBatchSize;
+      }
+
+      // Fetch beneficiaries in pages and collect up to 10 unassigned
+      const unassigned: Array<{ its_id: string }> = [];
+      offset = 0;
+      while (unassigned.length < 10) {
+        const { data, error } = await supabase
+          .from("beneficiaries")
+          .select("its_id")
+          .order("its_id")
+          .range(offset, offset + fetchBatchSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+
+        for (const b of data) {
+          if (!assignedSet.has(b.its_id)) {
+            unassigned.push(b);
+            if (unassigned.length >= 10) break;
+          }
+        }
+
+        offset += fetchBatchSize;
+      }
+
+      if (unassigned.length === 0) {
+        toast.success("All beneficiaries are already assigned.");
+        return;
+      }
+
+      const newAssignments = unassigned.map((beneficiary) => ({
+        beneficiary_its_id: beneficiary.its_id,
+        student_tr_number: session.tr_number,
+        event_tag: currentEvent,
+      }));
+
+      const { error } = await supabase.from("assignments").insert(newAssignments);
       if (error) throw error;
 
-      setHasActiveAssignmentRequest(true);
-      toast.success("✅ Request submitted! Admin will assign beneficiaries soon.");
+      setHasActiveAssignmentRequest(false);
+      toast.success(`✅ Assigned ${newAssignments.length} beneficiaries for "${currentEvent}".`);
+      refresh();
     } catch (err) {
       console.error(err);
-      toast.error("Failed to submit request");
+      toast.error("Failed to auto-assign beneficiaries");
     } finally {
       setRequestingAssignment(false);
     }
@@ -317,7 +369,7 @@ export default function Dashboard() {
             Ready for Ziyarat?
           </p>
           <p className="text-sm text-blue-700 dark:text-blue-300 mt-0.5">
-            Request Names for {currentEvent}
+            Auto-assign 10 names for {currentEvent}
           </p>
         </div>
       </div>
@@ -357,7 +409,7 @@ export default function Dashboard() {
           ) : (
             <Users className="w-4 h-4 mr-2" />
           )}
-          Request New Assignments
+          Assign 10 Names Now
         </Button>
       )}
     </div>
@@ -737,65 +789,8 @@ export default function Dashboard() {
                   ? "No matching records found"
                   : "No assignments yet"}
               </div>
-              
               {/* Assignment Request Card - shown when 0 assignments and no search */}
-              {!searchQuery && currentEvent && (
-                <div className="card-elevated p-6 bg-blue-50 dark:bg-blue-950/20 border-2 border-blue-200 dark:border-blue-900 max-w-lg mx-auto">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="p-3 rounded-lg bg-blue-500/20">
-                      <Users className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-medium text-blue-900 dark:text-blue-100">
-                        Ready for Ziyarat?
-                      </p>
-                      <p className="text-sm text-blue-700 dark:text-blue-300 mt-0.5">
-                        Request Names  for {currentEvent}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  {hasActiveAssignmentRequest ? (
-                    <div className="space-y-2">
-                      <div className="bg-white dark:bg-blue-950/50 rounded-md p-3 border border-blue-300 dark:border-blue-800">
-                        <p className="text-sm text-blue-900 dark:text-blue-200 font-medium">
-                          ✅ Request Already Submitted
-                        </p>
-                        <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
-                          Admin will process your request soon.
-                        </p>
-                      </div>
-                      <Button
-                        onClick={cancelAssignmentRequest}
-                        disabled={requestingAssignment}
-                        variant="outline"
-                        className="w-full border-blue-500 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-950"
-                        size="sm"
-                      >
-                        {requestingAssignment ? (
-                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                        ) : (
-                          <X className="w-4 h-4 mr-2" />
-                        )}
-                        Cancel Request
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button
-                      onClick={requestAssignment}
-                      disabled={requestingAssignment}
-                      className="w-full bg-blue-600 hover:bg-blue-700"
-                    >
-                      {requestingAssignment ? (
-                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                      ) : (
-                        <Users className="w-4 h-4 mr-2" />
-                      )}
-                      Request New Assignments
-                    </Button>
-                  )}
-                </div>
-              )}
+              {!searchQuery && assignmentRequestCard}
             </div>
           ) : (
             <div className="space-y-6">
