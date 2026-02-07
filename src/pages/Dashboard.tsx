@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSession, logout, StudentSession } from "@/lib/auth";
 import { useStudentAssignments, Assignment } from "@/hooks/useStudentAssignments";
@@ -19,6 +19,8 @@ import {
   List,
   AlignJustify,
   Users,
+  Mail,
+  MessageCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -39,6 +41,7 @@ export default function Dashboard() {
   const [hasActiveRequest, setHasActiveRequest] = useState(false);
   const [requestingAssignment, setRequestingAssignment] = useState(false);
   const [hasActiveAssignmentRequest, setHasActiveAssignmentRequest] = useState(false);
+  const [showAvailabilityBanner, setShowAvailabilityBanner] = useState(false);
   
 
   const {
@@ -62,8 +65,49 @@ export default function Dashboard() {
     fetchCurrentEvent();
     fetchMessageTemplates();
     checkActiveUnassignmentRequest(s.tr_number);
-    checkActiveAssignmentRequest(s.tr_number);
   }, [navigate]);
+
+  const currentEventAssignments = currentEvent
+    ? assignments.filter((a) => a.event_tag === currentEvent)
+    : [];
+  const currentEventTotal = currentEventAssignments.length;
+  const currentEventCompleted = currentEventAssignments.filter(
+    (a) => a.status === "completed"
+  ).length;
+  const currentEventPending = currentEventTotal - currentEventCompleted;
+  const isCurrentEventFullyCompleted = currentEventTotal > 0 && currentEventPending === 0;
+  const canRequestMoreForCurrentEvent =
+    !!currentEvent && availableInMumbai && (currentEventTotal === 0 || isCurrentEventFullyCompleted);
+
+  useEffect(() => {
+    if (!session?.tr_number || !currentEvent) return;
+    checkActiveAssignmentRequest(session.tr_number);
+  }, [session?.tr_number, currentEvent]);
+
+  useEffect(() => {
+    // Only show this tip on first-time / zero-assignments state (per session+event).
+    if (!session || !currentEvent || !availableInMumbai || currentEventTotal > 0) {
+      setShowAvailabilityBanner(false);
+      return;
+    }
+
+    const bannerKey = `availabilityBannerDismissed:${session.tr_number}:${currentEvent}`;
+    const hasDismissed = sessionStorage.getItem(bannerKey) === "true";
+    if (hasDismissed) {
+      setShowAvailabilityBanner(false);
+      return;
+    }
+
+    setShowAvailabilityBanner(true);
+    const timeoutId = window.setTimeout(() => {
+      sessionStorage.setItem(bannerKey, "true");
+      setShowAvailabilityBanner(false);
+    }, 10000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [session, currentEvent, availableInMumbai, currentEventTotal]);
 
 
   const fetchCurrentEvent = async () => {
@@ -100,28 +144,35 @@ export default function Dashboard() {
     
     setHasActiveRequest(!!data);
   };
-
   const requestUnassignment = async () => {
     if (!session || !currentEvent) return;
-    
+
     if (!confirm(`Request to unassign your pending work for "${currentEvent}"?\n\nThis will:\n- Notify admin to remove your pending assignments\n- Keep your completed work\n- Free up beneficiaries for reassignment\n\nContinue?`)) {
       return;
     }
 
     setRequestingUnassignment(true);
     try {
-      const { error } = await supabase
-        .from("unassignment_requests")
-        .insert({
-          student_tr_number: session.tr_number,
+      const { data, error } = await supabase.functions.invoke("notify-admin-request", {
+        body: {
+          kind: "unassignment",
+          tr_number: session.tr_number,
+          session_id: session.session_id,
           event_tag: currentEvent,
           reason: "Not available in Mumbai",
-        });
+        },
+      });
 
       if (error) throw error;
 
       setHasActiveRequest(true);
-      toast.success("✅ Request submitted! Admin will process it soon.");
+      if (data?.already_pending) {
+        toast.success("Request already submitted. Admin will process it soon.");
+      } else if (data?.emailed === false) {
+        toast.success("Request submitted. (Email notification may have failed)");
+      } else {
+        toast.success("Request submitted! Admin will process it soon.");
+      }
     } catch (err) {
       console.error(err);
       toast.error("Failed to submit request");
@@ -156,6 +207,16 @@ export default function Dashboard() {
 
     if (!availableInMumbai) {
       toast.error("Please mark yourself as available in Mumbai first.");
+      return;
+    }
+
+    const pendingForCurrentEvent = assignments.filter(
+      (a) => a.event_tag === currentEvent && a.status === "pending"
+    ).length;
+    if (pendingForCurrentEvent > 0) {
+      toast.error(
+        `You still have ${pendingForCurrentEvent} pending name(s) for "${currentEvent}". Complete them first.`
+      );
       return;
     }
 
@@ -232,7 +293,7 @@ export default function Dashboard() {
       if (error) throw error;
 
       setHasActiveAssignmentRequest(false);
-      toast.success(`✅ Assigned ${newAssignments.length} beneficiaries for "${currentEvent}".`);
+      toast.success(`Assigned ${newAssignments.length} beneficiaries for "${currentEvent}".`);
       refresh();
     } catch (err) {
       console.error(err);
@@ -251,7 +312,7 @@ export default function Dashboard() {
 
     setRequestingAssignment(true);
     try {
-      console.log("🗑️ Cancelling all requests for:", { tr: session.tr_number, event: currentEvent });
+      console.log("Cancelling all requests for:", { tr: session.tr_number, event: currentEvent });
       
       const { data, error } = await supabase
         .from("assignment_requests")
@@ -262,7 +323,7 @@ export default function Dashboard() {
 
       if (error) throw error;
 
-      console.log("✅ Deleted requests:", data?.length || 0, data);
+      console.log("Deleted requests:", data?.length || 0, data);
       
       setHasActiveAssignmentRequest(false);
       toast.success(`Request cancelled. ${data?.length || 0} request(s) removed.`);
@@ -311,8 +372,8 @@ export default function Dashboard() {
       setNeedsAvailabilitySelection(false);
       toast.success(
         newStatus
-          ? "✅ Marked as available in Mumbai"
-          : "❌ Marked as unavailable in Mumbai"
+          ? "Marked as available in Mumbai"
+          : "Marked as unavailable in Mumbai"
       );
     } catch (err) {
       console.error(err);
@@ -355,8 +416,13 @@ export default function Dashboard() {
     a.localeCompare(b)
   );
 
-  const hasCurrentEventAssignments =
-    !!currentEvent && assignments.some((a) => a.event_tag === currentEvent);
+  const assignmentCardTitle = isCurrentEventFullyCompleted
+    ? "All done for now!"
+    : "Ready for Ziyarat?";
+  const assignmentCardSubtitle =
+    currentEventTotal === 0
+      ? `Auto-assign 10 names for ${currentEvent}`
+      : `You completed ${currentEventCompleted}/${currentEventTotal} for ${currentEvent}. Get 10 more?`;
 
   const assignmentRequestCard = currentEvent ? (
     <div className="card-elevated p-6 bg-blue-50 dark:bg-blue-950/20 border-2 border-blue-200 dark:border-blue-900 max-w-lg mx-auto">
@@ -366,10 +432,10 @@ export default function Dashboard() {
         </div>
         <div className="flex-1">
           <p className="font-medium text-blue-900 dark:text-blue-100">
-            Ready for Ziyarat?
+            {assignmentCardTitle}
           </p>
           <p className="text-sm text-blue-700 dark:text-blue-300 mt-0.5">
-            Auto-assign 10 names for {currentEvent}
+            {assignmentCardSubtitle}
           </p>
         </div>
       </div>
@@ -377,26 +443,36 @@ export default function Dashboard() {
         <div className="space-y-2">
           <div className="bg-white dark:bg-blue-950/50 rounded-md p-3 border border-blue-300 dark:border-blue-800">
             <p className="text-sm text-blue-900 dark:text-blue-200 font-medium">
-              âœ… Request Already Submitted
+              Request Already Submitted
             </p>
             <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
               Admin will process your request soon.
             </p>
           </div>
-          <Button
-            onClick={cancelAssignmentRequest}
-            disabled={requestingAssignment}
-            variant="outline"
-            className="w-full border-blue-500 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-950"
-            size="sm"
-          >
-            {requestingAssignment ? (
-              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <X className="w-4 h-4 mr-2" />
-            )}
-            Cancel Request
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={requestAssignment}
+              disabled={requestingAssignment}
+              className="flex-1 bg-blue-600 hover:bg-blue-700"
+              size="sm"
+            >
+              {requestingAssignment ? (
+                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Users className="w-4 h-4 mr-2" />
+              )}
+              Assign 10 Now
+            </Button>
+            <Button
+              onClick={cancelAssignmentRequest}
+              disabled={requestingAssignment}
+              variant="outline"
+              className="border-blue-500 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-950"
+              size="sm"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       ) : (
         <Button
@@ -471,7 +547,7 @@ export default function Dashboard() {
 
             <div className="bg-muted/50 rounded-lg p-4 space-y-2">
               <p className="text-sm font-medium text-foreground">
-                📍 Event: <span className="text-primary">{currentEvent}</span>
+                Event: <span className="text-primary">{currentEvent}</span>
               </p>
               <p className="text-xs text-muted-foreground">
                 This helps us assign beneficiaries to students who are available in Mumbai
@@ -496,7 +572,7 @@ export default function Dashboard() {
 
                     setAvailableInMumbai(true);
                     setNeedsAvailabilitySelection(false);
-                    toast.success("✅ Marked as available in Mumbai");
+                    toast.success("Marked as available in Mumbai");
                   } catch (err) {
                     console.error(err);
                     toast.error("Failed to update availability");
@@ -512,7 +588,7 @@ export default function Dashboard() {
                 ) : (
                   <>
                     <MapPin className="w-5 h-5 mr-2" />
-                    ✅ I am available in Mumbai
+                    I am available in Mumbai
                   </>
                 )}
               </Button>
@@ -534,7 +610,7 @@ export default function Dashboard() {
 
                     setAvailableInMumbai(false);
                     setNeedsAvailabilitySelection(false);
-                    toast.success("❌ Marked as not available in Mumbai");
+                    toast.success("Marked as not available in Mumbai");
                   } catch (err) {
                     console.error(err);
                     toast.error("Failed to update availability");
@@ -551,7 +627,7 @@ export default function Dashboard() {
                 ) : (
                   <>
                     <X className="w-5 h-5 mr-2" />
-                    ❌ Not available in Mumbai
+                    Not available in Mumbai
                   </>
                 )}
               </Button>
@@ -621,7 +697,7 @@ export default function Dashboard() {
                     </div>
                     <div className="flex-1">
                       <p className="text-xs text-green-700 dark:text-green-400 font-medium">
-                        ✅ Available in Mumbai for
+                        Available in Mumbai for
                       </p>
                       <p className="font-bold text-sm text-green-900 dark:text-green-300">
                         {currentEvent}
@@ -638,23 +714,41 @@ export default function Dashboard() {
                   </button>
                 </div>
 
-                {!hasCurrentEventAssignments && (
+                {canRequestMoreForCurrentEvent && (
                   <>
-                    <div className="card-elevated p-4 bg-emerald-50 dark:bg-emerald-950/20 border-2 border-emerald-200 dark:border-emerald-900">
-                      <div className="flex items-start gap-3">
-                        <div className="p-2 rounded-lg bg-emerald-500/20">
-                          <Users className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-medium text-sm text-emerald-900 dark:text-emerald-100">
-                            You are marked available in Mumbai for {currentEvent}.
-                          </p>
-                          <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
-                            Admin will assign beneficiary names shortly. Thank you for confirming your availability.
-                          </p>
+                    {showAvailabilityBanner && currentEventTotal === 0 && (
+                      <div className="card-elevated p-3 bg-emerald-50 dark:bg-emerald-950/20 border-2 border-emerald-200 dark:border-emerald-900">
+                        <div className="flex items-start gap-3">
+                          <div className="p-2 rounded-lg bg-emerald-500/20">
+                            <Users className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                          </div>
+                          <div className="flex-1">
+                            <p className="font-medium text-sm text-emerald-900 dark:text-emerald-100">
+                              You are marked available in Mumbai for {currentEvent}.
+                            </p>
+                            <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
+                              Wait for Admin to Assign or use "Assign 10 Names Now" button below to get started immediately.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (session && currentEvent) {
+                                sessionStorage.setItem(
+                                  `availabilityBannerDismissed:${session.tr_number}:${currentEvent}`,
+                                  "true"
+                                );
+                              }
+                              setShowAvailabilityBanner(false);
+                            }}
+                            className="p-1 rounded-md text-emerald-700 hover:bg-emerald-100/70 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
+                            aria-label="Dismiss notification"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
                         </div>
                       </div>
-                    </div>
+                    )}
                     {assignmentRequestCard}
                   </>
                 )}
@@ -709,7 +803,7 @@ export default function Dashboard() {
                     {hasActiveRequest ? (
                       <div className="bg-white dark:bg-orange-950/50 rounded-md p-3 border border-orange-300 dark:border-orange-800">
                         <p className="text-sm text-orange-900 dark:text-orange-200 font-medium">
-                          ✅ Request Submitted
+                          Request Submitted
                         </p>
                         <p className="text-xs text-orange-700 dark:text-orange-400 mt-1">
                           Admin will process your unassignment request soon.
@@ -790,20 +884,26 @@ export default function Dashboard() {
                   : "No assignments yet"}
               </div>
               {/* Assignment Request Card - shown when 0 assignments and no search */}
-              {!searchQuery && assignmentRequestCard}
+              {!searchQuery && canRequestMoreForCurrentEvent && assignmentRequestCard}
             </div>
           ) : (
             <div className="space-y-6">
               {groupedEventTags.map((tag) => (
-                <section key={tag} className="card-elevated p-3">
-                  <div className="sticky top-[120px] z-10 -mx-3 px-3 py-2 bg-background/95 backdrop-blur border-b border-border rounded-t-lg flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-foreground">
-                      {tag}
-                    </h3>
+                <details key={tag} className="card-elevated p-3">
+                  <summary className="list-none cursor-pointer -mx-3 px-3 py-2 rounded-t-lg flex items-center justify-between gap-3 hover:bg-muted/40">
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-semibold text-foreground truncate">
+                        {tag}
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {groupedAssignments[tag].filter((a) => a.status === "completed").length}/
+                        {groupedAssignments[tag].length} completed
+                      </p>
+                    </div>
                     <span className="text-xs text-muted-foreground">
                       {groupedAssignments[tag].length} total
                     </span>
-                  </div>
+                  </summary>
                   <div className="space-y-1.5 pt-3">
                     {groupedAssignments[tag].map((assignment) => (
                       <AssignmentRow
@@ -817,7 +917,7 @@ export default function Dashboard() {
                       />
                     ))}
                   </div>
-                </section>
+                </details>
               ))}
             </div>
           )}
@@ -913,7 +1013,7 @@ function AssignmentRow({
                 className="p-1 hover:bg-green-500/20 rounded active:scale-95"
                 title={assignment.beneficiary.mobile}
               >
-                <span className="text-xs">💬</span>
+                <MessageCircle className="w-4 h-4 text-green-700 dark:text-green-300" />
               </a>
             )}
             {hasEmail && (
@@ -923,15 +1023,15 @@ function AssignmentRow({
                 className="p-1 hover:bg-blue-500/20 rounded active:scale-95"
                 title={assignment.beneficiary.email}
                 >
-                <span className="text-xs">✉️</span>
+                <Mail className="w-4 h-4 text-blue-700 dark:text-blue-300" />
                 </a>
             )}
           </div>
         )}
 
         {/* Status icon */}
-        <span className={`text-xs ${isCompleted ? "text-success" : "text-orange-600"}`}>
-          {isCompleted ? "✓" : "○"}
+        <span className={`text-[10px] ${isCompleted ? "text-success" : "text-orange-600"}`}>
+          {isCompleted ? "Done" : "Pending"}
         </span>
       </div>
     );
@@ -986,7 +1086,7 @@ function AssignmentRow({
       {hasContact && (
         <div className="mt-3 pt-3 border-t border-border space-y-2" onClick={(e) => e.stopPropagation()}>
           <p className="text-xs font-medium text-foreground mb-2">
-            📞 Contact to inform about Ziyarat:
+            Contact to inform about Ziyarat:
           </p>
           <div className="flex flex-col gap-2">
             {hasMobile && (
@@ -998,7 +1098,7 @@ function AssignmentRow({
                   onClick={() => vibrate(50)}
                   className="flex-1 px-3 py-2 bg-green-500/10 hover:bg-green-500/20 text-green-700 dark:text-green-300 rounded-md text-sm transition-colors flex items-center gap-2 font-medium"
                 >
-                  <span className="text-base">💬</span>
+                  <MessageCircle className="w-4 h-4" />
                   <span className="flex-1 truncate">{assignment.beneficiary.mobile}</span>
                   <span className="text-xs opacity-70">WhatsApp</span>
                 </a>
@@ -1022,7 +1122,7 @@ function AssignmentRow({
                   onClick={() => vibrate(50)}
                   className="flex-1 px-3 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-700 dark:text-blue-300 rounded-md text-sm transition-colors flex items-center gap-2 font-medium"
                 >
-                  <span className="text-base">✉️</span>
+                  <Mail className="w-4 h-4" />
                   <span className="flex-1 truncate">{assignment.beneficiary.email}</span>
                   <span className="text-xs opacity-70">Email</span>
                 </a>
@@ -1045,6 +1145,7 @@ function AssignmentRow({
     </div>
   );
 }
+
 
 
 
