@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+﻿import { useEffect, useState, useMemo, memo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSession, logout, StudentSession } from "@/lib/auth";
 import { useStudentAssignments, Assignment } from "@/hooks/useStudentAssignments";
@@ -67,13 +67,15 @@ export default function Dashboard() {
     checkActiveUnassignmentRequest(s.tr_number);
   }, [navigate]);
 
-  const currentEventAssignments = currentEvent
-    ? assignments.filter((a) => a.event_tag === currentEvent)
-    : [];
+  const currentEventAssignments = useMemo(() => {
+    return currentEvent
+      ? assignments.filter((a) => a.event_tag === currentEvent)
+      : [];
+  }, [assignments, currentEvent]);
   const currentEventTotal = currentEventAssignments.length;
-  const currentEventCompleted = currentEventAssignments.filter(
-    (a) => a.status === "completed"
-  ).length;
+  const currentEventCompleted = useMemo(() => {
+    return currentEventAssignments.filter((a) => a.status === "completed").length;
+  }, [currentEventAssignments]);
   const currentEventPending = currentEventTotal - currentEventCompleted;
   const isCurrentEventFullyCompleted = currentEventTotal > 0 && currentEventPending === 0;
   const canRequestMoreForCurrentEvent =
@@ -82,7 +84,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (!session?.tr_number || !currentEvent) return;
     checkActiveAssignmentRequest(session.tr_number);
-  }, [session?.tr_number, currentEvent]);
+  }, [session?.tr_number, currentEvent, checkActiveAssignmentRequest]);
 
   useEffect(() => {
     // Only show this tip on first-time / zero-assignments state (per session+event).
@@ -181,7 +183,7 @@ export default function Dashboard() {
     }
   };
 
-  const checkActiveAssignmentRequest = async (trNumber: string) => {
+  const checkActiveAssignmentRequest = useCallback(async (trNumber: string) => {
     if (!currentEvent) return;
     
     // Check for active request (pending OR rejected within 24h) for the CURRENT event only
@@ -201,7 +203,7 @@ export default function Dashboard() {
     
     // If there's a pending or recent rejected request for THIS event, show cancel option
     setHasActiveAssignmentRequest(!!data);
-  };
+  }, [currentEvent]);
   const requestAssignment = async () => {
     if (!session || !currentEvent) return;
 
@@ -395,26 +397,30 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  const filteredAssignments = assignments.filter((a) => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      a.beneficiary.full_name.toLowerCase().includes(query) ||
-      a.beneficiary.its_id.toLowerCase().includes(query) ||
-      (a.beneficiary.jamaat?.toLowerCase().includes(query) ?? false)
-    );
-  });
+  const filteredAssignments = useMemo(() => {
+    return assignments.filter((a) => {
+      if (!searchQuery) return true;
+      const query = searchQuery.toLowerCase();
+      return (
+        a.beneficiary.full_name.toLowerCase().includes(query) ||
+        a.beneficiary.its_id.toLowerCase().includes(query) ||
+        (a.beneficiary.jamaat?.toLowerCase().includes(query) ?? false)
+      );
+    });
+  }, [assignments, searchQuery]);
 
-  const groupedAssignments = filteredAssignments.reduce((acc, assignment) => {
-    const tag = assignment.event_tag || "Untagged";
-    if (!acc[tag]) acc[tag] = [];
-    acc[tag].push(assignment);
-    return acc;
-  }, {} as Record<string, Assignment[]>);
+  const groupedAssignments = useMemo(() => {
+    return filteredAssignments.reduce((acc, assignment) => {
+      const tag = assignment.event_tag || "Untagged";
+      if (!acc[tag]) acc[tag] = [];
+      acc[tag].push(assignment);
+      return acc;
+    }, {} as Record<string, Assignment[]>);
+  }, [filteredAssignments]);
 
-  const groupedEventTags = Object.keys(groupedAssignments).sort((a, b) =>
-    a.localeCompare(b)
-  );
+  const groupedEventTags = useMemo(() => {
+    return Object.keys(groupedAssignments).sort((a, b) => a.localeCompare(b));
+  }, [groupedAssignments]);
 
   const assignmentCardTitle = isCurrentEventFullyCompleted
     ? "All done for now!"
@@ -927,7 +933,7 @@ export default function Dashboard() {
   );
 }
 
-function AssignmentRow({
+const AssignmentRow = memo(function AssignmentRow({
   assignment,
   onToggle,
   compactMode = false,
@@ -1144,8 +1150,4 @@ function AssignmentRow({
       )}
     </div>
   );
-}
-
-
-
-
+});
