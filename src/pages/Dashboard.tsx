@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSession, logout, StudentSession } from "@/lib/auth";
 import { useStudentAssignments, Assignment } from "@/hooks/useStudentAssignments";
@@ -395,26 +395,32 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  const filteredAssignments = assignments.filter((a) => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      a.beneficiary.full_name.toLowerCase().includes(query) ||
-      a.beneficiary.its_id.toLowerCase().includes(query) ||
-      (a.beneficiary.jamaat?.toLowerCase().includes(query) ?? false)
+  const filteredAssignments = useMemo(() => {
+    return assignments.filter((a) => {
+      if (!searchQuery) return true;
+      const query = searchQuery.toLowerCase();
+      return (
+        a.beneficiary.full_name.toLowerCase().includes(query) ||
+        a.beneficiary.its_id.toLowerCase().includes(query) ||
+        (a.beneficiary.jamaat?.toLowerCase().includes(query) ?? false)
+      );
+    });
+  }, [assignments, searchQuery]);
+
+  const groupedAssignments = useMemo(() => {
+    return filteredAssignments.reduce((acc, assignment) => {
+      const tag = assignment.event_tag || "Untagged";
+      if (!acc[tag]) acc[tag] = [];
+      acc[tag].push(assignment);
+      return acc;
+    }, {} as Record<string, Assignment[]>);
+  }, [filteredAssignments]);
+
+  const groupedEventTags = useMemo(() => {
+    return Object.keys(groupedAssignments).sort((a, b) =>
+      a.localeCompare(b)
     );
-  });
-
-  const groupedAssignments = filteredAssignments.reduce((acc, assignment) => {
-    const tag = assignment.event_tag || "Untagged";
-    if (!acc[tag]) acc[tag] = [];
-    acc[tag].push(assignment);
-    return acc;
-  }, {} as Record<string, Assignment[]>);
-
-  const groupedEventTags = Object.keys(groupedAssignments).sort((a, b) =>
-    a.localeCompare(b)
-  );
+  }, [groupedAssignments]);
 
   const assignmentCardTitle = isCurrentEventFullyCompleted
     ? "All done for now!"
@@ -927,7 +933,7 @@ export default function Dashboard() {
   );
 }
 
-function AssignmentRow({
+const AssignmentRow = memo(function AssignmentRow({
   assignment,
   onToggle,
   compactMode = false,
@@ -1144,7 +1150,7 @@ function AssignmentRow({
       )}
     </div>
   );
-}
+});
 
 
 
