@@ -272,37 +272,67 @@ export default function Admin() {
   };
 
   const fetchStudentProgress = async () => {
+    // ⚡ Bolt Performance Optimization:
+    // Replaced N+1 query pattern with a batched O(1) query strategy.
+    // Instead of querying assignments per student (O(N) network calls),
+    // we fetch all assignments in chunks and aggregate them in memory.
     const { data: students } = await supabase
       .from("students")
       .select("tr_number, name, branch, available_in_mumbai")
       .eq("is_active", true)
       .order("name");
 
-    if (!students) return;
+    if (!students || students.length === 0) return;
 
-    const progressPromises = students.map(async (student) => {
-      const [assigned, completed] = await Promise.all([
-        supabase
-          .from("assignments")
-          .select("id", { count: "exact", head: true })
-          .eq("student_tr_number", student.tr_number),
-        supabase
-          .from("assignments")
-          .select("id", { count: "exact", head: true })
-          .eq("student_tr_number", student.tr_number)
-          .eq("status", "completed"),
-      ]);
+    // Extract student TR numbers to query assignments only for active students
+    const studentTrs = students.map(s => s.tr_number);
+    const assignmentStats = new Map<string, { assigned: number; completed: number }>();
 
+    // Fetch assignments for these students in chunks to avoid URL/query limits
+    const chunkSize = 500;
+    for (let i = 0; i < studentTrs.length; i += chunkSize) {
+      const chunk = studentTrs.slice(i, i + chunkSize);
+
+      const { data: assignments, error } = await supabase
+        .from("assignments")
+        .select("student_tr_number, status")
+        .in("student_tr_number", chunk);
+
+      if (error) {
+        console.error("Error fetching assignments for chunk:", error);
+        continue;
+      }
+
+      if (assignments) {
+        // Aggregate counts in memory
+        for (const assignment of assignments) {
+          if (!assignment.student_tr_number) continue;
+
+          let stats = assignmentStats.get(assignment.student_tr_number);
+          if (!stats) {
+            stats = { assigned: 0, completed: 0 };
+            assignmentStats.set(assignment.student_tr_number, stats);
+          }
+
+          stats.assigned += 1;
+          if (assignment.status === "completed") {
+            stats.completed += 1;
+          }
+        }
+      }
+    }
+
+    const progress = students.map((student) => {
+      const stats = assignmentStats.get(student.tr_number) || { assigned: 0, completed: 0 };
       return {
         ...student,
         branch: student.branch || "",
-        assigned: assigned.count || 0,
-        completed: completed.count || 0,
+        assigned: stats.assigned,
+        completed: stats.completed,
         available_in_mumbai: student.available_in_mumbai || false,
       };
     });
 
-    const progress = await Promise.all(progressPromises);
     setStudentProgress(progress);
   };
 
