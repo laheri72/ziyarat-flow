@@ -1,0 +1,3 @@
+## 2026-05-16 - [Memoize Expensive Computations and List Items]
+**Learning:** In applications like this one where large arrays of data (e.g. assignments or student progress) are manipulated with filter/reduce/sort functions within functional components, rendering can bottleneck because these expensive operations recalculate on every re-render. Similarly, large lists rendering unmemoized item components will cause all items to re-render when the parent updates.
+**Action:** Always wrap heavy array operations (sorting, filtering, grouping) in `useMemo` and wrap list item components in `React.memo` (along with stabilizing props like `onToggle` using `useCallback`) to prevent these performance bottlenecks.
