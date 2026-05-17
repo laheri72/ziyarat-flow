@@ -586,55 +586,56 @@ export default function Admin() {
       }
       console.log(`👥 Found ${students.length} active students`);
 
-      // Fetch ALL beneficiaries with pagination
-      const allBeneficiaries = [];
+      // ⚡ Bolt: Prevent N+1 query and memory bottleneck by batching assignment checks
+      // Fetch beneficiaries with pagination and check assignments in batches
+      const unassignedBeneficiaries = [];
       let offset = 0;
       const fetchBatchSize = 1000;
+      let totalBeneficiaries = 0;
+      let totalAssigned = 0;
       
-      console.log("📥 Fetching all beneficiaries...");
+      console.log("📥 Fetching beneficiaries and checking assignments...");
       while (true) {
-        const { data, error } = await supabase
+        const { data: batchBeneficiaries, error } = await supabase
           .from("beneficiaries")
           .select("its_id")
           .order('its_id')
           .range(offset, offset + fetchBatchSize - 1);
         
         if (error) throw error;
-        if (!data || data.length === 0) break;
+        if (!batchBeneficiaries || batchBeneficiaries.length === 0) break;
         
-        allBeneficiaries.push(...data);
-        offset += fetchBatchSize;
-        console.log(`📥 Loaded ${allBeneficiaries.length} beneficiaries...`);
-      }
+        totalBeneficiaries += batchBeneficiaries.length;
+        const batchItsIds = batchBeneficiaries.map(b => b.its_id);
 
-      // Fetch ALL assignments with pagination
-      const allAssignments = [];
-      offset = 0;
-      
-      console.log("📥 Fetching all assignments...");
-      while (true) {
-        const { data, error } = await supabase
-          .from("assignments")
-          .select("beneficiary_its_id")
-          .order('beneficiary_its_id')
-          .range(offset, offset + fetchBatchSize - 1);
-        
-        if (error) throw error;
-        if (!data || data.length === 0) break;
-        
-        allAssignments.push(...data);
-        offset += fetchBatchSize;
-        console.log(`📥 Loaded ${allAssignments.length} assignments...`);
-      }
+        // ⚡ Bolt: Chunk assignment query by exact ITS IDs to avoid fetching full assignments table
+        // We use smaller chunks for the IN query to prevent URL length limits or query complexity issues
+        const assignedSet = new Set();
+        const inChunkSize = 500;
+        for (let i = 0; i < batchItsIds.length; i += inChunkSize) {
+          const chunkIds = batchItsIds.slice(i, i + inChunkSize);
+          const { data: assignments, error: assignError } = await supabase
+            .from("assignments")
+            .select("beneficiary_its_id")
+            .in("beneficiary_its_id", chunkIds);
 
-      // Create a Set of assigned ITS IDs for fast lookup
-      const assignedSet = new Set(allAssignments.map(a => a.beneficiary_its_id));
+          if (assignError) throw assignError;
+          if (assignments) {
+             assignments.forEach(a => assignedSet.add(a.beneficiary_its_id));
+          }
+        }
+
+        totalAssigned += assignedSet.size;
+
+        const batchUnassigned = batchBeneficiaries.filter(b => !assignedSet.has(b.its_id));
+        unassignedBeneficiaries.push(...batchUnassigned);
+        
+        offset += fetchBatchSize;
+        console.log(`📥 Processed ${totalBeneficiaries} beneficiaries, found ${unassignedBeneficiaries.length} unassigned...`);
+      }
       
-      // Filter to get only unassigned beneficiaries
-      const unassignedBeneficiaries = allBeneficiaries.filter(b => !assignedSet.has(b.its_id));
-      
-      console.log(`👤 Total beneficiaries: ${allBeneficiaries.length}`);
-      console.log(`📋 Already assigned: ${assignedSet.size}`);
+      console.log(`👤 Total beneficiaries: ${totalBeneficiaries}`);
+      console.log(`📋 Already assigned: ${totalAssigned}`);
       console.log(`✅ Unassigned beneficiaries: ${unassignedBeneficiaries.length}`);
 
       if (unassignedBeneficiaries.length === 0) {
@@ -786,55 +787,55 @@ export default function Admin() {
 
       const selectedStudentsList = Array.from(selectedStudents);
 
-      // Fetch ALL beneficiaries with pagination
-      const allBeneficiaries = [];
+      // ⚡ Bolt: Prevent N+1 query and memory bottleneck by batching assignment checks
+      // Fetch beneficiaries with pagination and check assignments in batches
+      const unassignedBeneficiaries = [];
       let offset = 0;
       const fetchBatchSize = 1000;
+      let totalBeneficiaries = 0;
+      let totalAssigned = 0;
       
-      console.log("📥 Fetching all beneficiaries...");
+      console.log("📥 Fetching beneficiaries and checking assignments...");
       while (true) {
-        const { data, error } = await supabase
+        const { data: batchBeneficiaries, error } = await supabase
           .from("beneficiaries")
           .select("its_id")
           .order('its_id')
           .range(offset, offset + fetchBatchSize - 1);
         
         if (error) throw error;
-        if (!data || data.length === 0) break;
+        if (!batchBeneficiaries || batchBeneficiaries.length === 0) break;
         
-        allBeneficiaries.push(...data);
-        offset += fetchBatchSize;
-        console.log(`📥 Loaded ${allBeneficiaries.length} beneficiaries...`);
-      }
+        totalBeneficiaries += batchBeneficiaries.length;
+        const batchItsIds = batchBeneficiaries.map(b => b.its_id);
 
-      // Fetch ALL assignments with pagination
-      const allAssignments = [];
-      offset = 0;
-      
-      console.log("📥 Fetching all assignments...");
-      while (true) {
-        const { data, error } = await supabase
-          .from("assignments")
-          .select("beneficiary_its_id")
-          .order('beneficiary_its_id')
-          .range(offset, offset + fetchBatchSize - 1);
-        
-        if (error) throw error;
-        if (!data || data.length === 0) break;
-        
-        allAssignments.push(...data);
-        offset += fetchBatchSize;
-        console.log(`📥 Loaded ${allAssignments.length} assignments...`);
-      }
+        // ⚡ Bolt: Chunk assignment query by exact ITS IDs to avoid fetching full assignments table
+        const assignedSet = new Set();
+        const inChunkSize = 500;
+        for (let i = 0; i < batchItsIds.length; i += inChunkSize) {
+          const chunkIds = batchItsIds.slice(i, i + inChunkSize);
+          const { data: assignments, error: assignError } = await supabase
+            .from("assignments")
+            .select("beneficiary_its_id")
+            .in("beneficiary_its_id", chunkIds);
 
-      // Create a Set of assigned ITS IDs for fast lookup
-      const assignedSet = new Set(allAssignments.map(a => a.beneficiary_its_id));
+          if (assignError) throw assignError;
+          if (assignments) {
+             assignments.forEach(a => assignedSet.add(a.beneficiary_its_id));
+          }
+        }
+
+        totalAssigned += assignedSet.size;
+
+        const batchUnassigned = batchBeneficiaries.filter(b => !assignedSet.has(b.its_id));
+        unassignedBeneficiaries.push(...batchUnassigned);
+        
+        offset += fetchBatchSize;
+        console.log(`📥 Processed ${totalBeneficiaries} beneficiaries, found ${unassignedBeneficiaries.length} unassigned...`);
+      }
       
-      // Filter to get only unassigned beneficiaries
-      let unassignedBeneficiaries = allBeneficiaries.filter(b => !assignedSet.has(b.its_id));
-      
-      console.log(`👤 Total beneficiaries: ${allBeneficiaries.length}`);
-      console.log(`📋 Already assigned: ${assignedSet.size}`);
+      console.log(`👤 Total beneficiaries: ${totalBeneficiaries}`);
+      console.log(`📋 Already assigned: ${totalAssigned}`);
       console.log(`✅ Unassigned beneficiaries: ${unassignedBeneficiaries.length}`);
 
       if (unassignedBeneficiaries.length === 0) {
@@ -859,13 +860,14 @@ export default function Admin() {
         return;
       }
       
+      let finalBeneficiaries = unassignedBeneficiaries;
       if (cap < unassignedBeneficiaries.length) {
-        unassignedBeneficiaries = unassignedBeneficiaries.slice(0, cap);
+        finalBeneficiaries = unassignedBeneficiaries.slice(0, cap);
         console.log(`📊 Applied cap: assigning ${cap} beneficiaries`);
       }
 
       // Distribute unassigned beneficiaries evenly among SELECTED students
-      const newAssignments = unassignedBeneficiaries.map((beneficiary, index) => ({
+      const newAssignments = finalBeneficiaries.map((beneficiary, index) => ({
         beneficiary_its_id: beneficiary.its_id,
         student_tr_number: selectedStudentsList[index % selectedStudentsList.length],
         event_tag: eventTag.trim(),
