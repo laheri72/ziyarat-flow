@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+﻿import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSession, logout, StudentSession } from "@/lib/auth";
 import { useStudentAssignments, Assignment } from "@/hooks/useStudentAssignments";
@@ -67,13 +67,15 @@ export default function Dashboard() {
     checkActiveUnassignmentRequest(s.tr_number);
   }, [navigate]);
 
-  const currentEventAssignments = currentEvent
+  // ⚡ Bolt: Memoized derived states currentEventAssignments and currentEventCompleted
+  // to avoid recalculating these filtering operations on every render.
+  const currentEventAssignments = useMemo(() => currentEvent
     ? assignments.filter((a) => a.event_tag === currentEvent)
-    : [];
+    : [], [assignments, currentEvent]);
   const currentEventTotal = currentEventAssignments.length;
-  const currentEventCompleted = currentEventAssignments.filter(
+  const currentEventCompleted = useMemo(() => currentEventAssignments.filter(
     (a) => a.status === "completed"
-  ).length;
+  ).length, [currentEventAssignments]);
   const currentEventPending = currentEventTotal - currentEventCompleted;
   const isCurrentEventFullyCompleted = currentEventTotal > 0 && currentEventPending === 0;
   const canRequestMoreForCurrentEvent =
@@ -395,7 +397,9 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  const filteredAssignments = assignments.filter((a) => {
+  // ⚡ Bolt: Memoized heavy data transformations (filtering by search and grouping by tags)
+  // to prevent unnecessary re-calculations and re-renders when other state like compactMode changes.
+  const filteredAssignments = useMemo(() => assignments.filter((a) => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     return (
@@ -403,18 +407,18 @@ export default function Dashboard() {
       a.beneficiary.its_id.toLowerCase().includes(query) ||
       (a.beneficiary.jamaat?.toLowerCase().includes(query) ?? false)
     );
-  });
+  }), [assignments, searchQuery]);
 
-  const groupedAssignments = filteredAssignments.reduce((acc, assignment) => {
+  const groupedAssignments = useMemo(() => filteredAssignments.reduce((acc, assignment) => {
     const tag = assignment.event_tag || "Untagged";
     if (!acc[tag]) acc[tag] = [];
     acc[tag].push(assignment);
     return acc;
-  }, {} as Record<string, Assignment[]>);
+  }, {} as Record<string, Assignment[]>), [filteredAssignments]);
 
-  const groupedEventTags = Object.keys(groupedAssignments).sort((a, b) =>
+  const groupedEventTags = useMemo(() => Object.keys(groupedAssignments).sort((a, b) =>
     a.localeCompare(b)
-  );
+  ), [groupedAssignments]);
 
   const assignmentCardTitle = isCurrentEventFullyCompleted
     ? "All done for now!"
@@ -927,7 +931,9 @@ export default function Dashboard() {
   );
 }
 
-function AssignmentRow({
+// ⚡ Bolt: Wrapped AssignmentRow in React.memo so that it skips re-rendering
+// unless its assignment prop or the stable onToggle callback changes.
+const AssignmentRow = React.memo(function AssignmentRow({
   assignment,
   onToggle,
   compactMode = false,
@@ -1144,8 +1150,4 @@ function AssignmentRow({
       )}
     </div>
   );
-}
-
-
-
-
+});

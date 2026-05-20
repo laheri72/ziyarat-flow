@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { getSession } from "@/lib/auth";
 import { toast } from "sonner";
@@ -79,7 +79,9 @@ export function useStudentAssignments() {
     fetchAssignments();
   }, [fetchAssignments]);
 
-  const toggleStatus = async (assignmentId: string, currentStatus: "pending" | "completed") => {
+  // ⚡ Bolt: Wrapped toggleStatus in useCallback to maintain a stable function reference
+  // and prevent unnecessary re-renders of child components that depend on it.
+  const toggleStatus = useCallback(async (assignmentId: string, currentStatus: "pending" | "completed") => {
     const newStatus = currentStatus === "pending" ? "completed" : "pending";
     const completedAt = newStatus === "completed" ? new Date().toISOString() : null;
 
@@ -107,11 +109,16 @@ export function useStudentAssignments() {
       // Revert on error
       fetchAssignments();
     }
-  };
+  }, [fetchAssignments]);
 
-  const completedCount = assignments.filter((a) => a.status === "completed").length;
-  const totalCount = assignments.length;
-  const progress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  // ⚡ Bolt: Memoized derived state calculations (completedCount, totalCount, progress)
+  // to avoid re-evaluating these metrics on every render unless assignments change.
+  const { completedCount, totalCount, progress } = useMemo(() => {
+    const completedCount = assignments.filter((a) => a.status === "completed").length;
+    const totalCount = assignments.length;
+    const progress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+    return { completedCount, totalCount, progress };
+  }, [assignments]);
 
   return {
     assignments,
