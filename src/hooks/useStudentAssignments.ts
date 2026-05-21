@@ -79,7 +79,8 @@ export function useStudentAssignments() {
     fetchAssignments();
   }, [fetchAssignments]);
 
-  const toggleStatus = async (assignmentId: string, currentStatus: "pending" | "completed") => {
+  // ⚡ Bolt: Wrap with useCallback to keep function reference stable, preventing child components from re-rendering
+  const toggleStatus = useCallback(async (assignmentId: string, currentStatus: "pending" | "completed") => {
     const newStatus = currentStatus === "pending" ? "completed" : "pending";
     const completedAt = newStatus === "completed" ? new Date().toISOString() : null;
 
@@ -107,7 +108,7 @@ export function useStudentAssignments() {
       // Revert on error
       fetchAssignments();
     }
-  };
+  }, [fetchAssignments]);
 
   const completedCount = assignments.filter((a) => a.status === "completed").length;
   const totalCount = assignments.length;
