@@ -1,0 +1,4 @@
+## 2024-05-24 - React Component Memoization Pattern
+
+**Learning:** When dealing with long lists of items in React (like assignments in the dashboard), preventing unnecessary re-renders of list items is critical for performance. Wrapping item components like `AssignmentRow` with `React.memo` and ensuring their prop dependencies (like `onToggle` callbacks) are wrapped in `useCallback` is highly effective. Additionally, deriving states through filtering and grouping should be memoized with `useMemo` to prevent expensive array operations on unrelated state changes (like typing in a search bar).
+**Action:** Apply this pattern consistently across all lists where items are rendered dynamically and contain interactive elements. Ensure that any callback passed down as a prop is memoized if the child component relies on referential equality to avoid re-renders.

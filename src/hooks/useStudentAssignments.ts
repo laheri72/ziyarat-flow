@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { getSession } from "@/lib/auth";
 import { toast } from "sonner";
@@ -79,7 +79,8 @@ export function useStudentAssignments() {
     fetchAssignments();
   }, [fetchAssignments]);
 
-  const toggleStatus = async (assignmentId: string, currentStatus: "pending" | "completed") => {
+  // ⚡ Bolt: wrap in useCallback to prevent unnecessary recreations on re-render
+  const toggleStatus = useCallback(async (assignmentId: string, currentStatus: "pending" | "completed") => {
     const newStatus = currentStatus === "pending" ? "completed" : "pending";
     const completedAt = newStatus === "completed" ? new Date().toISOString() : null;
 
@@ -107,11 +108,15 @@ export function useStudentAssignments() {
       // Revert on error
       fetchAssignments();
     }
-  };
+  }, [fetchAssignments]);
 
-  const completedCount = assignments.filter((a) => a.status === "completed").length;
-  const totalCount = assignments.length;
-  const progress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  // ⚡ Bolt: memoize derived state calculations
+  const { completedCount, totalCount, progress } = useMemo(() => {
+    const completed = assignments.filter((a) => a.status === "completed").length;
+    const total = assignments.length;
+    const prog = total > 0 ? Math.round((completed / total) * 100) : 0;
+    return { completedCount: completed, totalCount: total, progress: prog };
+  }, [assignments]);
 
   return {
     assignments,
