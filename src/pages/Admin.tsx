@@ -272,37 +272,52 @@ export default function Admin() {
   };
 
   const fetchStudentProgress = async () => {
+    // ⚡ Bolt: Fetch students and batch process assignments to eliminate N+1 queries
     const { data: students } = await supabase
       .from("students")
       .select("tr_number, name, branch, available_in_mumbai")
       .eq("is_active", true)
       .order("name");
 
-    if (!students) return;
+    if (!students || students.length === 0) return;
 
-    const progressPromises = students.map(async (student) => {
-      const [assigned, completed] = await Promise.all([
-        supabase
-          .from("assignments")
-          .select("id", { count: "exact", head: true })
-          .eq("student_tr_number", student.tr_number),
-        supabase
-          .from("assignments")
-          .select("id", { count: "exact", head: true })
-          .eq("student_tr_number", student.tr_number)
-          .eq("status", "completed"),
-      ]);
+    const chunkSize = 50;
+    const assignmentCounts = new Map<string, { assigned: number; completed: number }>();
 
+    for (let i = 0; i < students.length; i += chunkSize) {
+      const chunk = students.slice(i, i + chunkSize).map((s) => s.tr_number);
+
+      const { data: assignments } = await supabase
+        .from("assignments")
+        .select("student_tr_number, status")
+        .in("student_tr_number", chunk);
+
+      if (assignments) {
+        for (const assignment of assignments) {
+          const tr = assignment.student_tr_number;
+          if (!assignmentCounts.has(tr)) {
+            assignmentCounts.set(tr, { assigned: 0, completed: 0 });
+          }
+          const counts = assignmentCounts.get(tr)!;
+          counts.assigned += 1;
+          if (assignment.status === "completed") {
+            counts.completed += 1;
+          }
+        }
+      }
+    }
+
+    const progress = students.map((student) => {
+      const counts = assignmentCounts.get(student.tr_number) || { assigned: 0, completed: 0 };
       return {
         ...student,
         branch: student.branch || "",
-        assigned: assigned.count || 0,
-        completed: completed.count || 0,
+        assigned: counts.assigned,
+        completed: counts.completed,
         available_in_mumbai: student.available_in_mumbai || false,
       };
     });
 
-    const progress = await Promise.all(progressPromises);
     setStudentProgress(progress);
   };
 
@@ -1042,23 +1057,39 @@ export default function Admin() {
         return;
       }
 
-      // Fetch student names and pending counts
-      const enrichedRequests = await Promise.all(
-        requests.map(async (req) => {
-          const [studentData, pendingCount] = await Promise.all([
-            supabase.from("students").select("name").eq("tr_number", req.student_tr_number).single(),
-            supabase.from("assignments").select("id", { count: "exact", head: true })
-              .eq("student_tr_number", req.student_tr_number)
-              .eq("status", "pending"),
-          ]);
+      // ⚡ Bolt: Fetch student names and pending counts in batch
+      const trNumbers = [...new Set(requests.map((r) => r.student_tr_number))];
+      const studentMap = new Map<string, string>();
+      const pendingMap = new Map<string, number>();
 
-          return {
-            ...req,
-            student_name: studentData.data?.name || req.student_tr_number,
-            pending_count: pendingCount.count || 0,
-          };
-        })
-      );
+      if (trNumbers.length > 0) {
+        const { data: students } = await supabase
+          .from("students")
+          .select("tr_number, name")
+          .in("tr_number", trNumbers);
+
+        if (students) {
+          students.forEach((s) => studentMap.set(s.tr_number, s.name));
+        }
+
+        const { data: pendingAssignments } = await supabase
+          .from("assignments")
+          .select("student_tr_number")
+          .in("student_tr_number", trNumbers)
+          .eq("status", "pending");
+
+        if (pendingAssignments) {
+          pendingAssignments.forEach((a) => {
+            pendingMap.set(a.student_tr_number, (pendingMap.get(a.student_tr_number) || 0) + 1);
+          });
+        }
+      }
+
+      const enrichedRequests = requests.map((req) => ({
+        ...req,
+        student_name: studentMap.get(req.student_tr_number) || req.student_tr_number,
+        pending_count: pendingMap.get(req.student_tr_number) || 0,
+      }));
 
       // Filter out requests with 0 pending assignments
       setUnassignmentRequests(enrichedRequests.filter(r => r.pending_count > 0));
@@ -1150,22 +1181,38 @@ export default function Admin() {
         return;
       }
 
-      // Fetch student names and current assignment counts
-      const enrichedRequests = await Promise.all(
-        requests.map(async (req) => {
-          const [studentData, assignmentCount] = await Promise.all([
-            supabase.from("students").select("name").eq("tr_number", req.student_tr_number).single(),
-            supabase.from("assignments").select("id", { count: "exact", head: true })
-              .eq("student_tr_number", req.student_tr_number),
-          ]);
+      // ⚡ Bolt: Fetch student names and assignment counts in batch
+      const trNumbers = [...new Set(requests.map((r) => r.student_tr_number))];
+      const studentMap = new Map<string, string>();
+      const assignmentsMap = new Map<string, number>();
 
-          return {
-            ...req,
-            student_name: studentData.data?.name || req.student_tr_number,
-            current_assignments: assignmentCount.count || 0,
-          };
-        })
-      );
+      if (trNumbers.length > 0) {
+        const { data: students } = await supabase
+          .from("students")
+          .select("tr_number, name")
+          .in("tr_number", trNumbers);
+
+        if (students) {
+          students.forEach((s) => studentMap.set(s.tr_number, s.name));
+        }
+
+        const { data: assignments } = await supabase
+          .from("assignments")
+          .select("student_tr_number")
+          .in("student_tr_number", trNumbers);
+
+        if (assignments) {
+          assignments.forEach((a) => {
+            assignmentsMap.set(a.student_tr_number, (assignmentsMap.get(a.student_tr_number) || 0) + 1);
+          });
+        }
+      }
+
+      const enrichedRequests = requests.map((req) => ({
+        ...req,
+        student_name: studentMap.get(req.student_tr_number) || req.student_tr_number,
+        current_assignments: assignmentsMap.get(req.student_tr_number) || 0,
+      }));
 
       console.log("📋 Enriched requests:", enrichedRequests);
 
