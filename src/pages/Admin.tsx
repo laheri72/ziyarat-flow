@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1332,7 +1332,7 @@ export default function Admin() {
     }
   };
 
-  const filteredProgress = studentProgress
+  const filteredProgress = useMemo(() => studentProgress
     .filter((s) => {
       if (!searchQuery) return true;
       const query = searchQuery.toLowerCase();
@@ -1375,7 +1375,7 @@ export default function Admin() {
       if (aValue < bValue) return sortOrder === "asc" ? -1 : 1;
       if (aValue > bValue) return sortOrder === "asc" ? 1 : -1;
       return 0;
-    });
+    }), [studentProgress, searchQuery, sortBy, sortOrder]);
 
   if (authChecking) {
     return (
