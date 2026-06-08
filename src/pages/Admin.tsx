@@ -280,29 +280,41 @@ export default function Admin() {
 
     if (!students) return;
 
-    const progressPromises = students.map(async (student) => {
-      const [assigned, completed] = await Promise.all([
-        supabase
-          .from("assignments")
-          .select("id", { count: "exact", head: true })
-          .eq("student_tr_number", student.tr_number),
-        supabase
-          .from("assignments")
-          .select("id", { count: "exact", head: true })
-          .eq("student_tr_number", student.tr_number)
-          .eq("status", "completed"),
-      ]);
+    // ⚡ Bolt: Resolved N+1 query by batch fetching related assignments
+    const trNumbers = students.map((s) => s.tr_number);
+    const chunkSize = 50;
+    const assignmentCounts = new Map<string, { assigned: number; completed: number }>();
 
+    for (let i = 0; i < trNumbers.length; i += chunkSize) {
+      const chunk = trNumbers.slice(i, i + chunkSize);
+      const { data: assignmentsChunk } = await supabase
+        .from("assignments")
+        .select("student_tr_number, status")
+        .in("student_tr_number", chunk);
+
+      if (assignmentsChunk) {
+        assignmentsChunk.forEach((assignment) => {
+          const stats = assignmentCounts.get(assignment.student_tr_number) || { assigned: 0, completed: 0 };
+          stats.assigned += 1;
+          if (assignment.status === "completed") {
+            stats.completed += 1;
+          }
+          assignmentCounts.set(assignment.student_tr_number, stats);
+        });
+      }
+    }
+
+    const progress = students.map((student) => {
+      const stats = assignmentCounts.get(student.tr_number) || { assigned: 0, completed: 0 };
       return {
         ...student,
         branch: student.branch || "",
-        assigned: assigned.count || 0,
-        completed: completed.count || 0,
+        assigned: stats.assigned,
+        completed: stats.completed,
         available_in_mumbai: student.available_in_mumbai || false,
       };
     });
 
-    const progress = await Promise.all(progressPromises);
     setStudentProgress(progress);
   };
 
