@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSession, logout, StudentSession } from "@/lib/auth";
 import { useStudentAssignments, Assignment } from "@/hooks/useStudentAssignments";
@@ -67,14 +67,32 @@ export default function Dashboard() {
     checkActiveUnassignmentRequest(s.tr_number);
   }, [navigate]);
 
-  const currentEventAssignments = currentEvent
-    ? assignments.filter((a) => a.event_tag === currentEvent)
-    : [];
-  const currentEventTotal = currentEventAssignments.length;
-  const currentEventCompleted = currentEventAssignments.filter(
-    (a) => a.status === "completed"
-  ).length;
-  const currentEventPending = currentEventTotal - currentEventCompleted;
+  // ⚡ Bolt: Memoized derived state to prevent recalculation on every render. Loop combined.
+  const {
+    currentEventTotal,
+    currentEventCompleted,
+    currentEventPending,
+  } = useMemo(() => {
+    let total = 0;
+    let completed = 0;
+
+    if (currentEvent) {
+      for (let i = 0; i < assignments.length; i++) {
+        if (assignments[i].event_tag === currentEvent) {
+          total++;
+          if (assignments[i].status === "completed") {
+            completed++;
+          }
+        }
+      }
+    }
+
+    return {
+      currentEventTotal: total,
+      currentEventCompleted: completed,
+      currentEventPending: total - completed,
+    };
+  }, [assignments, currentEvent]);
   const isCurrentEventFullyCompleted = currentEventTotal > 0 && currentEventPending === 0;
   const canRequestMoreForCurrentEvent =
     !!currentEvent && availableInMumbai && (currentEventTotal === 0 || isCurrentEventFullyCompleted);
@@ -395,26 +413,30 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  const filteredAssignments = assignments.filter((a) => {
-    if (!searchQuery) return true;
+  // ⚡ Bolt: Memoized heavy data transformations (filtering, grouping, sorting)
+  // to avoid blocking the main thread when typing search queries.
+  const filteredAssignments = useMemo(() => {
+    if (!searchQuery) return assignments;
     const query = searchQuery.toLowerCase();
-    return (
+    return assignments.filter((a) => (
       a.beneficiary.full_name.toLowerCase().includes(query) ||
       a.beneficiary.its_id.toLowerCase().includes(query) ||
       (a.beneficiary.jamaat?.toLowerCase().includes(query) ?? false)
-    );
-  });
+    ));
+  }, [assignments, searchQuery]);
 
-  const groupedAssignments = filteredAssignments.reduce((acc, assignment) => {
-    const tag = assignment.event_tag || "Untagged";
-    if (!acc[tag]) acc[tag] = [];
-    acc[tag].push(assignment);
-    return acc;
-  }, {} as Record<string, Assignment[]>);
+  const groupedAssignments = useMemo(() => {
+    return filteredAssignments.reduce((acc, assignment) => {
+      const tag = assignment.event_tag || "Untagged";
+      if (!acc[tag]) acc[tag] = [];
+      acc[tag].push(assignment);
+      return acc;
+    }, {} as Record<string, Assignment[]>);
+  }, [filteredAssignments]);
 
-  const groupedEventTags = Object.keys(groupedAssignments).sort((a, b) =>
-    a.localeCompare(b)
-  );
+  const groupedEventTags = useMemo(() => {
+    return Object.keys(groupedAssignments).sort((a, b) => a.localeCompare(b));
+  }, [groupedAssignments]);
 
   const assignmentCardTitle = isCurrentEventFullyCompleted
     ? "All done for now!"
