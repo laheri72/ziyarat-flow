@@ -79,7 +79,10 @@ export function useStudentAssignments() {
     fetchAssignments();
   }, [fetchAssignments]);
 
-  const toggleStatus = async (assignmentId: string, currentStatus: "pending" | "completed") => {
+  // ⚡ Bolt: Wrap toggleStatus in useCallback to keep its reference stable.
+  // This is required so we can safely pass it down to list items wrapped in React.memo
+  // without breaking memoization.
+  const toggleStatus = useCallback(async (assignmentId: string, currentStatus: "pending" | "completed") => {
     const newStatus = currentStatus === "pending" ? "completed" : "pending";
     const completedAt = newStatus === "completed" ? new Date().toISOString() : null;
 
@@ -107,7 +110,7 @@ export function useStudentAssignments() {
       // Revert on error
       fetchAssignments();
     }
-  };
+  }, [fetchAssignments]);
 
   const completedCount = assignments.filter((a) => a.status === "completed").length;
   const totalCount = assignments.length;

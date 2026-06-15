@@ -1,0 +1,3 @@
+## 2024-05-18 - Memoize list items and derive state safely
+**Learning:** In highly-interactive lists like `Dashboard.tsx` and `Admin.tsx`, recalculating heavy `.filter()` and `.sort()` on every state change causes widespread re-renders. Also, doing string manipulations (like `toLowerCase()`) synchronously inside array iteration (`.filter`) blocking the main thread.
+**Action:** Extract expensive synchronous transformations like `searchQuery.toLowerCase()` outside of loop callbacks, handling possible nulls. Use `useMemo` for heavy data filtering, grouping, and sorting. Wrap long list items in `React.memo` and strictly supply stable callbacks (e.g. `useCallback` for `toggleStatus`) to prevent unnecessary list sub-component rendering.
