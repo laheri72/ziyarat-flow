@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+﻿import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSession, logout, StudentSession } from "@/lib/auth";
 import { useStudentAssignments, Assignment } from "@/hooks/useStudentAssignments";
@@ -395,26 +395,35 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  const filteredAssignments = assignments.filter((a) => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      a.beneficiary.full_name.toLowerCase().includes(query) ||
-      a.beneficiary.its_id.toLowerCase().includes(query) ||
-      (a.beneficiary.jamaat?.toLowerCase().includes(query) ?? false)
-    );
-  });
+  const { filteredAssignments, groupedAssignments, groupedEventTags } = useMemo(() => {
+    // ⚡ Bolt: Hoisted string conversion outside the loop to prevent redundant operations
+    const query = searchQuery ? searchQuery.toLowerCase() : "";
 
-  const groupedAssignments = filteredAssignments.reduce((acc, assignment) => {
-    const tag = assignment.event_tag || "Untagged";
-    if (!acc[tag]) acc[tag] = [];
-    acc[tag].push(assignment);
-    return acc;
-  }, {} as Record<string, Assignment[]>);
+    // ⚡ Bolt: Memoized heavy array filtering and transformations
+    const filtered = assignments.filter((a) => {
+      if (!query) return true;
+      return (
+        a.beneficiary.full_name.toLowerCase().includes(query) ||
+        a.beneficiary.its_id.toLowerCase().includes(query) ||
+        (a.beneficiary.jamaat?.toLowerCase().includes(query) ?? false)
+      );
+    });
 
-  const groupedEventTags = Object.keys(groupedAssignments).sort((a, b) =>
-    a.localeCompare(b)
-  );
+    const grouped = filtered.reduce((acc, assignment) => {
+      const tag = assignment.event_tag || "Untagged";
+      if (!acc[tag]) acc[tag] = [];
+      acc[tag].push(assignment);
+      return acc;
+    }, {} as Record<string, Assignment[]>);
+
+    const tags = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+
+    return {
+      filteredAssignments: filtered,
+      groupedAssignments: grouped,
+      groupedEventTags: tags
+    };
+  }, [assignments, searchQuery]);
 
   const assignmentCardTitle = isCurrentEventFullyCompleted
     ? "All done for now!"
