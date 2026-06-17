@@ -1,0 +1,3 @@
+## 2024-05-24 - React useMemo Performance Optimizations
+**Learning:** In large list rendering components (like `src/pages/Dashboard.tsx` and `src/pages/Admin.tsx`), redundant string operations such as `searchQuery.toLowerCase()` inside a `.filter()` loop can cause main-thread blocking synchronous work. Furthermore, complex transformations like `.filter().reduce()` or `.filter().sort()` run on every re-render unless memoized.
+**Action:** When working with list filtering/sorting/grouping in React components, systematically pull out static/derived values (e.g., `query = searchQuery.toLowerCase()`) outside the loop closure. Additionally, wrap the entire transformation logic inside `useMemo` to prevent redundant computations on unrelated state updates.

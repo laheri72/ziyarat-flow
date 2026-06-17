@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1332,50 +1332,54 @@ export default function Admin() {
     }
   };
 
-  const filteredProgress = studentProgress
-    .filter((s) => {
-      if (!searchQuery) return true;
-      const query = searchQuery.toLowerCase();
-      return (
-        s.name.toLowerCase().includes(query) ||
-        s.tr_number.toLowerCase().includes(query) ||
-        s.branch.toLowerCase().includes(query)
-      );
-    })
-    .sort((a, b) => {
-      let aValue: string | number;
-      let bValue: string | number;
+  // ⚡ Bolt: Memoize filtered and sorted progress to avoid recomputing on unrelated state changes (like activeTab).
+  // ⚡ Bolt: Hoist searchQuery.toLowerCase() out of the filter loop.
+  const filteredProgress = useMemo(() => {
+    const query = searchQuery ? searchQuery.toLowerCase() : "";
+    return studentProgress
+      .filter((s) => {
+        if (!query) return true;
+        return (
+          s.name.toLowerCase().includes(query) ||
+          s.tr_number.toLowerCase().includes(query) ||
+          s.branch.toLowerCase().includes(query)
+        );
+      })
+      .sort((a, b) => {
+        let aValue: string | number;
+        let bValue: string | number;
 
-      switch (sortBy) {
-        case "name":
-          aValue = a.name.toLowerCase();
-          bValue = b.name.toLowerCase();
-          break;
-        case "branch":
-          aValue = a.branch.toLowerCase();
-          bValue = b.branch.toLowerCase();
-          break;
-        case "assigned":
-          aValue = a.assigned;
-          bValue = b.assigned;
-          break;
-        case "completed":
-          aValue = a.completed;
-          bValue = b.completed;
-          break;
-        case "progress":
-          aValue = a.assigned > 0 ? (a.completed / a.assigned) * 100 : 0;
-          bValue = b.assigned > 0 ? (b.completed / b.assigned) * 100 : 0;
-          break;
-        default:
-          aValue = 0;
-          bValue = 0;
-      }
+        switch (sortBy) {
+          case "name":
+            aValue = a.name.toLowerCase();
+            bValue = b.name.toLowerCase();
+            break;
+          case "branch":
+            aValue = a.branch.toLowerCase();
+            bValue = b.branch.toLowerCase();
+            break;
+          case "assigned":
+            aValue = a.assigned;
+            bValue = b.assigned;
+            break;
+          case "completed":
+            aValue = a.completed;
+            bValue = b.completed;
+            break;
+          case "progress":
+            aValue = a.assigned > 0 ? (a.completed / a.assigned) * 100 : 0;
+            bValue = b.assigned > 0 ? (b.completed / b.assigned) * 100 : 0;
+            break;
+          default:
+            aValue = 0;
+            bValue = 0;
+        }
 
-      if (aValue < bValue) return sortOrder === "asc" ? -1 : 1;
-      if (aValue > bValue) return sortOrder === "asc" ? 1 : -1;
-      return 0;
-    });
+        if (aValue < bValue) return sortOrder === "asc" ? -1 : 1;
+        if (aValue > bValue) return sortOrder === "asc" ? 1 : -1;
+        return 0;
+      });
+  }, [studentProgress, searchQuery, sortBy, sortOrder]);
 
   if (authChecking) {
     return (
