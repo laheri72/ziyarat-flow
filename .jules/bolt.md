@@ -1,0 +1,3 @@
+## 2026-06-19 - [React useMemo Optimization in Dashboard]
+**Learning:** In a React application heavily relying on list rendering with frequent status updates (like `Dashboard.tsx`), re-evaluating filtering and grouping operations synchronously on every render (e.g., when toggling an assignment status) can block the main thread and degrade perceived performance.
+**Action:** Use `useMemo` to memoize expensive data transformations (filtering, sorting, and grouping) based on their specific dependencies (e.g., `assignments` array and `searchQuery`), preventing redundant calculations on unrelated state changes.
