@@ -1,0 +1,3 @@
+## 2024-06-21 - Optimizing React Loop Hoisting and Safe BOM Replacements
+**Learning:** Hoisting operations like `searchQuery.toLowerCase()` outside of `.filter()` loops directly prevents blocking the main thread from redundant synchronous string processing in React lists. Additionally, `useMemo` protects against re-calculating filtered lists on unrelated state changes, but applying edits to BOM files requires targeted `utf-8-sig` Python scripts to avoid corruption.
+**Action:** Always identify static or easily derived strings inside array iteration and extract them immediately. Verify files with BOMs and only employ `run_in_bash_session` Python `replace` scripts with `.read(encoding='utf-8-sig')` to modify them correctly.

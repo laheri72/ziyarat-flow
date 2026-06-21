@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+﻿import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSession, logout, StudentSession } from "@/lib/auth";
 import { useStudentAssignments, Assignment } from "@/hooks/useStudentAssignments";
@@ -395,26 +395,36 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  const filteredAssignments = assignments.filter((a) => {
-    if (!searchQuery) return true;
+  // ⚡ Bolt: Memoize filtered assignments to prevent re-filtering on unrelated re-renders
+  const filteredAssignments = useMemo(() => {
+    if (!searchQuery) return assignments;
+    // ⚡ Bolt: Hoist string lowercasing outside the inner filter loop
     const query = searchQuery.toLowerCase();
-    return (
-      a.beneficiary.full_name.toLowerCase().includes(query) ||
-      a.beneficiary.its_id.toLowerCase().includes(query) ||
-      (a.beneficiary.jamaat?.toLowerCase().includes(query) ?? false)
+    return assignments.filter((a) => {
+      return (
+        a.beneficiary.full_name.toLowerCase().includes(query) ||
+        a.beneficiary.its_id.toLowerCase().includes(query) ||
+        (a.beneficiary.jamaat?.toLowerCase().includes(query) ?? false)
+      );
+    });
+  }, [assignments, searchQuery]);
+
+  // ⚡ Bolt: Memoize grouped assignments based on filtered assignments
+  const groupedAssignments = useMemo(() => {
+    return filteredAssignments.reduce((acc, assignment) => {
+      const tag = assignment.event_tag || "Untagged";
+      if (!acc[tag]) acc[tag] = [];
+      acc[tag].push(assignment);
+      return acc;
+    }, {} as Record<string, Assignment[]>);
+  }, [filteredAssignments]);
+
+  // ⚡ Bolt: Memoize tags sorting to avoid sorting on every render
+  const groupedEventTags = useMemo(() => {
+    return Object.keys(groupedAssignments).sort((a, b) =>
+      a.localeCompare(b)
     );
-  });
-
-  const groupedAssignments = filteredAssignments.reduce((acc, assignment) => {
-    const tag = assignment.event_tag || "Untagged";
-    if (!acc[tag]) acc[tag] = [];
-    acc[tag].push(assignment);
-    return acc;
-  }, {} as Record<string, Assignment[]>);
-
-  const groupedEventTags = Object.keys(groupedAssignments).sort((a, b) =>
-    a.localeCompare(b)
-  );
+  }, [groupedAssignments]);
 
   const assignmentCardTitle = isCurrentEventFullyCompleted
     ? "All done for now!"
