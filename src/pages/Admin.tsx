@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -750,10 +750,16 @@ export default function Admin() {
     setSelectedStudents(newSelection);
   };
 
+  // ⚡ Bolt: Memoize available vs other students to prevent redundant array filtering on every render
+  const { availableInMumbaiStudents, otherStudents } = useMemo(() => {
+    return {
+      availableInMumbaiStudents: availableStudents.filter(s => s.available_in_mumbai),
+      otherStudents: availableStudents.filter(s => !s.available_in_mumbai)
+    };
+  }, [availableStudents]);
+
   const selectAllAvailable = () => {
-    const availableTrNumbers = availableStudents
-      .filter(s => s.available_in_mumbai)
-      .map(s => s.tr_number);
+    const availableTrNumbers = availableInMumbaiStudents.map(s => s.tr_number);
     setSelectedStudents(new Set(availableTrNumbers));
   };
 
@@ -1332,17 +1338,20 @@ export default function Admin() {
     }
   };
 
-  const filteredProgress = studentProgress
-    .filter((s) => {
-      if (!searchQuery) return true;
-      const query = searchQuery.toLowerCase();
-      return (
-        s.name.toLowerCase().includes(query) ||
-        s.tr_number.toLowerCase().includes(query) ||
-        s.branch.toLowerCase().includes(query)
-      );
-    })
-    .sort((a, b) => {
+  // ⚡ Bolt: Memoize filtered and sorted progress data to prevent unnecessary array iterations on every render
+  const filteredProgress = useMemo(() => {
+    const query = searchQuery ? searchQuery.toLowerCase() : "";
+
+    return studentProgress
+      .filter((s) => {
+        if (!query) return true;
+        return (
+          s.name.toLowerCase().includes(query) ||
+          s.tr_number.toLowerCase().includes(query) ||
+          s.branch.toLowerCase().includes(query)
+        );
+      })
+      .sort((a, b) => {
       let aValue: string | number;
       let bValue: string | number;
 
@@ -1376,6 +1385,7 @@ export default function Admin() {
       if (aValue > bValue) return sortOrder === "asc" ? 1 : -1;
       return 0;
     });
+  }, [studentProgress, searchQuery, sortBy, sortOrder]);
 
   if (authChecking) {
     return (
@@ -1872,7 +1882,7 @@ export default function Admin() {
                       onClick={selectAllAvailable}
                       className="text-green-600 border-green-600 hover:bg-green-50 dark:hover:bg-green-950"
                     >
-                      Select All Available ({availableStudents.filter(s => s.available_in_mumbai).length})
+                      Select All Available ({availableInMumbaiStudents.length})
                     </Button>
                     <Button size="sm" variant="outline" onClick={selectAll}>
                       Select All ({availableStudents.length})
@@ -1906,16 +1916,15 @@ export default function Admin() {
                 {/* Students List */}
                 <div className="space-y-2 max-h-96 overflow-y-auto mb-4">
                   {/* Available Students - Green Section */}
-                  {availableStudents.filter(s => s.available_in_mumbai).length > 0 && (
+                  {availableInMumbaiStudents.length > 0 && (
                     <div className="mb-4">
                       <div className="flex items-center gap-2 mb-2 sticky top-0 bg-background py-2">
                         <div className="w-3 h-3 rounded-full bg-green-500"></div>
                         <h4 className="font-medium text-sm text-green-600 dark:text-green-400">
-                          Available in Mumbai ({availableStudents.filter(s => s.available_in_mumbai).length})
+                          Available in Mumbai ({availableInMumbaiStudents.length})
                         </h4>
                       </div>
-                      {availableStudents
-                        .filter(s => s.available_in_mumbai)
+                      {availableInMumbaiStudents
                         .map((student) => (
                           <label
                             key={student.tr_number}
@@ -1942,16 +1951,15 @@ export default function Admin() {
                   )}
 
                   {/* Other Students */}
-                  {availableStudents.filter(s => !s.available_in_mumbai).length > 0 && (
+                  {otherStudents.length > 0 && (
                     <div>
                       <div className="flex items-center gap-2 mb-2 sticky top-0 bg-background py-2">
                         <div className="w-3 h-3 rounded-full bg-gray-400"></div>
                         <h4 className="font-medium text-sm text-muted-foreground">
-                          Other Students ({availableStudents.filter(s => !s.available_in_mumbai).length})
+                          Other Students ({otherStudents.length})
                         </h4>
                       </div>
-                      {availableStudents
-                        .filter(s => !s.available_in_mumbai)
+                      {otherStudents
                         .map((student) => (
                           <label
                             key={student.tr_number}

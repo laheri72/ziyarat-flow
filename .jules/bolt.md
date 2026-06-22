@@ -1,0 +1,3 @@
+## 2024-06-22 - Optimizing array filtering inside React render loops
+**Learning:** Frequent recalculation of filtered array values (like filtering users or assignments based on search queries) during React renders causes unnecessary synchronous workload blocking the main thread, especially when loops contain costly operations.
+**Action:** Use `useMemo` to memoize the results of these array operations, preventing redundant recalculations when dependencies like `searchQuery` or `assignments` haven't changed. Make sure to hoist out operations like `.toLowerCase()` outside inner loops when feasible.
