@@ -1,0 +1,3 @@
+## 2023-11-09 - UI List Memoization and Callback Stabilization
+**Learning:** In heavy UI lists that perform filtering, grouping, and mapping (like `Dashboard.tsx` and `Admin.tsx`), the default behavior of React functional components causes massive re-evaluation and reallocation of strings `.toLowerCase()` on every single re-render, creating a severe main-thread bottleneck.
+**Action:** Always hoist string conversions outside inner array callbacks (`.filter`) using conditional early returns, and wrap the list component (`AssignmentRow`) in `React.memo` paired with stabilizing callback references (`useCallback`) to avoid thrashing.
