@@ -1,0 +1,3 @@
+## 2023-10-27 - [React Render Optimization for Arrays]
+**Learning:** In React components like `Admin.tsx` and `Dashboard.tsx`, derived states like heavy array filtering, sorting, or complex `.reduce()` groupings inside component bodies block the main thread and cause unnecessary overhead during re-renders, especially when dealing with frequent state updates (e.g., controlled inputs like `searchQuery`).
+**Action:** Always wrap heavy list processing logic in `useMemo` with proper dependency arrays to prevent recalculation unless the underlying data or filter parameters change. Also, when chaining `.filter()` and `.sort()`, be mindful that `.filter()` returns a new array, making a preceding shallow copy (`[...array]`) redundant to protect against `.sort()`'s mutation.
