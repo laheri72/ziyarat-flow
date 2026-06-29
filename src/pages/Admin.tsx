@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import React, { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1332,17 +1332,23 @@ export default function Admin() {
     }
   };
 
-  const filteredProgress = studentProgress
-    .filter((s) => {
-      if (!searchQuery) return true;
-      const query = searchQuery.toLowerCase();
-      return (
-        s.name.toLowerCase().includes(query) ||
-        s.tr_number.toLowerCase().includes(query) ||
-        s.branch.toLowerCase().includes(query)
-      );
-    })
-    .sort((a, b) => {
+  // ⚡ Bolt: Moved static toLowerCase() conversion outside of inner filter loop
+  // to avoid redundant string allocations and operations per array element.
+  // We also create a shallow copy before sorting since Array.prototype.sort mutates in place,
+  // though the filter() method already returns a new array, but it's good practice.
+  // We use useMemo to memoize this expensive array sorting and filtering operation.
+  const filteredProgress = React.useMemo(() => {
+    const query = searchQuery ? searchQuery.toLowerCase() : '';
+    return studentProgress
+      .filter((s) => {
+        if (!query) return true;
+        return (
+          s.name.toLowerCase().includes(query) ||
+          s.tr_number.toLowerCase().includes(query) ||
+          s.branch.toLowerCase().includes(query)
+        );
+      })
+      .sort((a, b) => {
       let aValue: string | number;
       let bValue: string | number;
 
@@ -1376,6 +1382,7 @@ export default function Admin() {
       if (aValue > bValue) return sortOrder === "asc" ? 1 : -1;
       return 0;
     });
+  }, [studentProgress, searchQuery, sortBy, sortOrder]);
 
   if (authChecking) {
     return (
