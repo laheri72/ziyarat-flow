@@ -236,40 +236,40 @@ export default function Dashboard() {
         console.warn("Failed to cleanup old assignment requests:", cleanupError);
       }
 
-      const assignedSet = new Set<string>();
-      const fetchBatchSize = 1000;
+      // ⚡ Bolt: Optimized fetching of unassigned beneficiaries to prevent loading entire table into memory.
+      // Instead of fetching all assignments (O(N) payload) and all beneficiaries,
+      // we fetch beneficiaries in chunks and only query assignments for those specific IDs
+      // until we find 10 unassigned ones. This drastically reduces data transfer and memory usage.
+      const unassigned: Array<{ its_id: string }> = [];
+      const fetchBatchSize = 200;
       let offset = 0;
 
-      // Fetch ALL assignments to build assigned set
-      while (true) {
-        const { data, error } = await supabase
-          .from("assignments")
-          .select("beneficiary_its_id")
-          .order("beneficiary_its_id")
-          .range(offset, offset + fetchBatchSize - 1);
-
-        if (error) throw error;
-        if (!data || data.length === 0) break;
-
-        data.forEach((a) => assignedSet.add(a.beneficiary_its_id));
-        offset += fetchBatchSize;
-      }
-
-      // Fetch beneficiaries in pages and collect up to 10 unassigned
-      const unassigned: Array<{ its_id: string }> = [];
-      offset = 0;
       while (unassigned.length < 10) {
-        const { data, error } = await supabase
+        // 1. Fetch a batch of beneficiaries
+        const { data: beneficiariesBatch, error: bError } = await supabase
           .from("beneficiaries")
           .select("its_id")
           .order("its_id")
           .range(offset, offset + fetchBatchSize - 1);
 
-        if (error) throw error;
-        if (!data || data.length === 0) break;
+        if (bError) throw bError;
+        if (!beneficiariesBatch || beneficiariesBatch.length === 0) break;
 
-        for (const b of data) {
-          if (!assignedSet.has(b.its_id)) {
+        const itsIds = beneficiariesBatch.map(b => b.its_id);
+
+        // 2. Check which of these are already assigned
+        const { data: assignedBatch, error: aError } = await supabase
+          .from("assignments")
+          .select("beneficiary_its_id")
+          .in("beneficiary_its_id", itsIds);
+
+        if (aError) throw aError;
+
+        const assignedSetBatch = new Set(assignedBatch?.map(a => a.beneficiary_its_id) || []);
+
+        // 3. Collect unassigned ones
+        for (const b of beneficiariesBatch) {
+          if (!assignedSetBatch.has(b.its_id)) {
             unassigned.push(b);
             if (unassigned.length >= 10) break;
           }

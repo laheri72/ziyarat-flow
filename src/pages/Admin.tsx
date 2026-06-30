@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -586,55 +586,50 @@ export default function Admin() {
       }
       console.log(`👥 Found ${students.length} active students`);
 
-      // Fetch ALL beneficiaries with pagination
-      const allBeneficiaries = [];
+      // ⚡ Bolt: Optimized fetching of unassigned beneficiaries to prevent N+1 and full table loads.
+      // We chunk the beneficiaries and use an IN clause for assignments.
+      const unassignedBeneficiaries: Array<{ its_id: string }> = [];
       let offset = 0;
       const fetchBatchSize = 1000;
+      let totalBeneficiaries = 0;
       
-      console.log("📥 Fetching all beneficiaries...");
+      console.log("📥 Fetching beneficiaries and checking assignment status...");
       while (true) {
-        const { data, error } = await supabase
+        const { data: beneficiariesBatch, error: bError } = await supabase
           .from("beneficiaries")
           .select("its_id")
           .order('its_id')
           .range(offset, offset + fetchBatchSize - 1);
         
-        if (error) throw error;
-        if (!data || data.length === 0) break;
+        if (bError) throw bError;
+        if (!beneficiariesBatch || beneficiariesBatch.length === 0) break;
         
-        allBeneficiaries.push(...data);
-        offset += fetchBatchSize;
-        console.log(`📥 Loaded ${allBeneficiaries.length} beneficiaries...`);
-      }
+        totalBeneficiaries += beneficiariesBatch.length;
+        const itsIds = beneficiariesBatch.map(b => b.its_id);
 
-      // Fetch ALL assignments with pagination
-      const allAssignments = [];
-      offset = 0;
-      
-      console.log("📥 Fetching all assignments...");
-      while (true) {
-        const { data, error } = await supabase
+        const { data: assignedBatch, error: aError } = await supabase
           .from("assignments")
           .select("beneficiary_its_id")
-          .order('beneficiary_its_id')
-          .range(offset, offset + fetchBatchSize - 1);
+          .in("beneficiary_its_id", itsIds);
+
+        if (aError) throw aError;
+
+        const assignedSetBatch = new Set(assignedBatch?.map(a => a.beneficiary_its_id) || []);
+
+        for (const b of beneficiariesBatch) {
+          if (!assignedSetBatch.has(b.its_id)) {
+            unassignedBeneficiaries.push(b);
+          }
+        }
         
-        if (error) throw error;
-        if (!data || data.length === 0) break;
-        
-        allAssignments.push(...data);
         offset += fetchBatchSize;
-        console.log(`📥 Loaded ${allAssignments.length} assignments...`);
+        console.log(`📥 Processed ${totalBeneficiaries} beneficiaries...`);
       }
 
-      // Create a Set of assigned ITS IDs for fast lookup
-      const assignedSet = new Set(allAssignments.map(a => a.beneficiary_its_id));
+      const assignedCount = totalBeneficiaries - unassignedBeneficiaries.length;
       
-      // Filter to get only unassigned beneficiaries
-      const unassignedBeneficiaries = allBeneficiaries.filter(b => !assignedSet.has(b.its_id));
-      
-      console.log(`👤 Total beneficiaries: ${allBeneficiaries.length}`);
-      console.log(`📋 Already assigned: ${assignedSet.size}`);
+      console.log(`👤 Total beneficiaries: ${totalBeneficiaries}`);
+      console.log(`📋 Already assigned: ${assignedCount}`);
       console.log(`✅ Unassigned beneficiaries: ${unassignedBeneficiaries.length}`);
 
       if (unassignedBeneficiaries.length === 0) {
@@ -786,55 +781,50 @@ export default function Admin() {
 
       const selectedStudentsList = Array.from(selectedStudents);
 
-      // Fetch ALL beneficiaries with pagination
-      const allBeneficiaries = [];
+      // ⚡ Bolt: Optimized fetching of unassigned beneficiaries to prevent N+1 and full table loads.
+      // We chunk the beneficiaries and use an IN clause for assignments.
+      let unassignedBeneficiaries: Array<{ its_id: string }> = [];
       let offset = 0;
       const fetchBatchSize = 1000;
+      let totalBeneficiaries = 0;
       
-      console.log("📥 Fetching all beneficiaries...");
+      console.log("📥 Fetching beneficiaries and checking assignment status...");
       while (true) {
-        const { data, error } = await supabase
+        const { data: beneficiariesBatch, error: bError } = await supabase
           .from("beneficiaries")
           .select("its_id")
           .order('its_id')
           .range(offset, offset + fetchBatchSize - 1);
         
-        if (error) throw error;
-        if (!data || data.length === 0) break;
+        if (bError) throw bError;
+        if (!beneficiariesBatch || beneficiariesBatch.length === 0) break;
         
-        allBeneficiaries.push(...data);
-        offset += fetchBatchSize;
-        console.log(`📥 Loaded ${allBeneficiaries.length} beneficiaries...`);
-      }
+        totalBeneficiaries += beneficiariesBatch.length;
+        const itsIds = beneficiariesBatch.map(b => b.its_id);
 
-      // Fetch ALL assignments with pagination
-      const allAssignments = [];
-      offset = 0;
-      
-      console.log("📥 Fetching all assignments...");
-      while (true) {
-        const { data, error } = await supabase
+        const { data: assignedBatch, error: aError } = await supabase
           .from("assignments")
           .select("beneficiary_its_id")
-          .order('beneficiary_its_id')
-          .range(offset, offset + fetchBatchSize - 1);
+          .in("beneficiary_its_id", itsIds);
+
+        if (aError) throw aError;
+
+        const assignedSetBatch = new Set(assignedBatch?.map(a => a.beneficiary_its_id) || []);
+
+        for (const b of beneficiariesBatch) {
+          if (!assignedSetBatch.has(b.its_id)) {
+            unassignedBeneficiaries.push(b);
+          }
+        }
         
-        if (error) throw error;
-        if (!data || data.length === 0) break;
-        
-        allAssignments.push(...data);
         offset += fetchBatchSize;
-        console.log(`📥 Loaded ${allAssignments.length} assignments...`);
+        console.log(`📥 Processed ${totalBeneficiaries} beneficiaries...`);
       }
 
-      // Create a Set of assigned ITS IDs for fast lookup
-      const assignedSet = new Set(allAssignments.map(a => a.beneficiary_its_id));
+      const assignedCount = totalBeneficiaries - unassignedBeneficiaries.length;
       
-      // Filter to get only unassigned beneficiaries
-      let unassignedBeneficiaries = allBeneficiaries.filter(b => !assignedSet.has(b.its_id));
-      
-      console.log(`👤 Total beneficiaries: ${allBeneficiaries.length}`);
-      console.log(`📋 Already assigned: ${assignedSet.size}`);
+      console.log(`👤 Total beneficiaries: ${totalBeneficiaries}`);
+      console.log(`📋 Already assigned: ${assignedCount}`);
       console.log(`✅ Unassigned beneficiaries: ${unassignedBeneficiaries.length}`);
 
       if (unassignedBeneficiaries.length === 0) {
