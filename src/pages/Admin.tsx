@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -73,6 +73,19 @@ export default function Admin() {
   });
   const [showManualAssign, setShowManualAssign] = useState(false);
   const [availableStudents, setAvailableStudents] = useState<Array<{ tr_number: string; name: string; branch: string; available_in_mumbai: boolean }>>([]);
+
+  const { availableInMumbai, otherStudents } = useMemo(() => {
+    const inMumbai: Array<{ tr_number: string; name: string; branch: string; available_in_mumbai: boolean }> = [];
+    const others: Array<{ tr_number: string; name: string; branch: string; available_in_mumbai: boolean }> = [];
+    for (const student of availableStudents) {
+      if (student.available_in_mumbai) {
+        inMumbai.push(student);
+      } else {
+        others.push(student);
+      }
+    }
+    return { availableInMumbai: inMumbai, otherStudents: others };
+  }, [availableStudents]);
   const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set());
   const [currentEventForAssign, setCurrentEventForAssign] = useState("");
   const [existingEventTags, setExistingEventTags] = useState<string[]>([]);
@@ -1872,7 +1885,7 @@ export default function Admin() {
                       onClick={selectAllAvailable}
                       className="text-green-600 border-green-600 hover:bg-green-50 dark:hover:bg-green-950"
                     >
-                      Select All Available ({availableStudents.filter(s => s.available_in_mumbai).length})
+                      Select All Available ({availableInMumbai.length})
                     </Button>
                     <Button size="sm" variant="outline" onClick={selectAll}>
                       Select All ({availableStudents.length})
@@ -1906,16 +1919,15 @@ export default function Admin() {
                 {/* Students List */}
                 <div className="space-y-2 max-h-96 overflow-y-auto mb-4">
                   {/* Available Students - Green Section */}
-                  {availableStudents.filter(s => s.available_in_mumbai).length > 0 && (
+                  {availableInMumbai.length > 0 && (
                     <div className="mb-4">
                       <div className="flex items-center gap-2 mb-2 sticky top-0 bg-background py-2">
                         <div className="w-3 h-3 rounded-full bg-green-500"></div>
                         <h4 className="font-medium text-sm text-green-600 dark:text-green-400">
-                          Available in Mumbai ({availableStudents.filter(s => s.available_in_mumbai).length})
+                          Available in Mumbai ({availableInMumbai.length})
                         </h4>
                       </div>
-                      {availableStudents
-                        .filter(s => s.available_in_mumbai)
+                      {availableInMumbai
                         .map((student) => (
                           <label
                             key={student.tr_number}
@@ -1942,16 +1954,15 @@ export default function Admin() {
                   )}
 
                   {/* Other Students */}
-                  {availableStudents.filter(s => !s.available_in_mumbai).length > 0 && (
+                  {otherStudents.length > 0 && (
                     <div>
                       <div className="flex items-center gap-2 mb-2 sticky top-0 bg-background py-2">
                         <div className="w-3 h-3 rounded-full bg-gray-400"></div>
                         <h4 className="font-medium text-sm text-muted-foreground">
-                          Other Students ({availableStudents.filter(s => !s.available_in_mumbai).length})
+                          Other Students ({otherStudents.length})
                         </h4>
                       </div>
-                      {availableStudents
-                        .filter(s => !s.available_in_mumbai)
+                      {otherStudents
                         .map((student) => (
                           <label
                             key={student.tr_number}
