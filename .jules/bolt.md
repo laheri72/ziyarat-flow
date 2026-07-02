@@ -1,0 +1,3 @@
+## 2024-03-24 - [Optimizing List Filtering and Memoization]
+**Learning:** Performing string operations like `toLowerCase()` inside `.filter()` loops blocks the main thread on every keystroke in search inputs. Also, wrapping list item components with `React.memo` is ineffective if their event handlers (callbacks) passed from parents are not wrapped in `useCallback`, as they will change reference on every render.
+**Action:** Always hoist invariant string transformations (e.g. `searchQuery.toLowerCase()`) outside the loop when filtering arrays. When memoizing list row components, ensure all callback props passed to them are stabilized with `useCallback`.

@@ -79,7 +79,8 @@ export function useStudentAssignments() {
     fetchAssignments();
   }, [fetchAssignments]);
 
-  const toggleStatus = async (assignmentId: string, currentStatus: "pending" | "completed") => {
+  // ⚡ Bolt: Stabilize callback with useCallback so it doesn't invalidate memoized child components
+  const toggleStatus = useCallback(async (assignmentId: string, currentStatus: "pending" | "completed") => {
     const newStatus = currentStatus === "pending" ? "completed" : "pending";
     const completedAt = newStatus === "completed" ? new Date().toISOString() : null;
 
@@ -107,7 +108,7 @@ export function useStudentAssignments() {
       // Revert on error
       fetchAssignments();
     }
-  };
+  }, [fetchAssignments]);
 
   const completedCount = assignments.filter((a) => a.status === "completed").length;
   const totalCount = assignments.length;
