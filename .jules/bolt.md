@@ -1,0 +1,3 @@
+## 2024-05-18 - Missing Memoization on Heavy Array Transformations
+**Learning:** Found multiple instances where heavy array transformations (filtering, mapping, reducing, and sorting) were performed directly inside the render body in both `Dashboard.tsx` and `Admin.tsx`. Given that these applications handle large datasets (hundreds to thousands of assignments/beneficiaries), executing these synchronous operations on every re-render blocks the main thread unnecessarily.
+**Action:** Always wrap heavy data transformations (`.filter`, `.map`, `.reduce`, `.sort`) in `useMemo` when rendering large lists in React to prevent main thread blocking and unnecessary recalculations during unrelated state updates.
