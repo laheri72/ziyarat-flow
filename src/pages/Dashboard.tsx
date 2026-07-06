@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+﻿import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSession, logout, StudentSession } from "@/lib/auth";
 import { useStudentAssignments, Assignment } from "@/hooks/useStudentAssignments";
@@ -67,13 +67,19 @@ export default function Dashboard() {
     checkActiveUnassignmentRequest(s.tr_number);
   }, [navigate]);
 
-  const currentEventAssignments = currentEvent
-    ? assignments.filter((a) => a.event_tag === currentEvent)
-    : [];
+  // ⚡ Bolt: Memoized current event assignments to avoid filtering on every render
+  const currentEventAssignments = useMemo(() => {
+    return currentEvent
+      ? assignments.filter((a) => a.event_tag === currentEvent)
+      : [];
+  }, [currentEvent, assignments]);
+
   const currentEventTotal = currentEventAssignments.length;
-  const currentEventCompleted = currentEventAssignments.filter(
-    (a) => a.status === "completed"
-  ).length;
+
+  // ⚡ Bolt: Memoized completed count to prevent redundant iteration
+  const currentEventCompleted = useMemo(() => {
+    return currentEventAssignments.filter((a) => a.status === "completed").length;
+  }, [currentEventAssignments]);
   const currentEventPending = currentEventTotal - currentEventCompleted;
   const isCurrentEventFullyCompleted = currentEventTotal > 0 && currentEventPending === 0;
   const canRequestMoreForCurrentEvent =
@@ -395,26 +401,31 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  const filteredAssignments = assignments.filter((a) => {
-    if (!searchQuery) return true;
+  // ⚡ Bolt: Memoized filtering to prevent synchronous string operations blocking main thread on re-renders
+  const filteredAssignments = useMemo(() => {
+    if (!searchQuery) return assignments;
     const query = searchQuery.toLowerCase();
-    return (
-      a.beneficiary.full_name.toLowerCase().includes(query) ||
-      a.beneficiary.its_id.toLowerCase().includes(query) ||
-      (a.beneficiary.jamaat?.toLowerCase().includes(query) ?? false)
-    );
-  });
+    return assignments.filter((a) => {
+      return (
+        a.beneficiary.full_name.toLowerCase().includes(query) ||
+        a.beneficiary.its_id.toLowerCase().includes(query) ||
+        (a.beneficiary.jamaat?.toLowerCase().includes(query) ?? false)
+      );
+    });
+  }, [assignments, searchQuery]);
 
-  const groupedAssignments = filteredAssignments.reduce((acc, assignment) => {
-    const tag = assignment.event_tag || "Untagged";
-    if (!acc[tag]) acc[tag] = [];
-    acc[tag].push(assignment);
-    return acc;
-  }, {} as Record<string, Assignment[]>);
+  // ⚡ Bolt: Memoized grouping and sorting to avoid expensive array reductions on render
+  const { groupedAssignments, groupedEventTags } = useMemo(() => {
+    const grouped = filteredAssignments.reduce((acc, assignment) => {
+      const tag = assignment.event_tag || "Untagged";
+      if (!acc[tag]) acc[tag] = [];
+      acc[tag].push(assignment);
+      return acc;
+    }, {} as Record<string, Assignment[]>);
 
-  const groupedEventTags = Object.keys(groupedAssignments).sort((a, b) =>
-    a.localeCompare(b)
-  );
+    const tags = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+    return { groupedAssignments: grouped, groupedEventTags: tags };
+  }, [filteredAssignments]);
 
   const assignmentCardTitle = isCurrentEventFullyCompleted
     ? "All done for now!"

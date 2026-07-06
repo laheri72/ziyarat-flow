@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1332,17 +1332,20 @@ export default function Admin() {
     }
   };
 
-  const filteredProgress = studentProgress
-    .filter((s) => {
-      if (!searchQuery) return true;
+  // ⚡ Bolt: Memoized filtering and sorting of student progress to avoid O(N log N) work on every render
+  const filteredProgress = useMemo(() => {
+    let result = studentProgress;
+
+    if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      return (
+      result = result.filter((s) => (
         s.name.toLowerCase().includes(query) ||
         s.tr_number.toLowerCase().includes(query) ||
         s.branch.toLowerCase().includes(query)
-      );
-    })
-    .sort((a, b) => {
+      ));
+    }
+
+    return [...result].sort((a, b) => {
       let aValue: string | number;
       let bValue: string | number;
 
@@ -1376,6 +1379,7 @@ export default function Admin() {
       if (aValue > bValue) return sortOrder === "asc" ? 1 : -1;
       return 0;
     });
+  }, [studentProgress, searchQuery, sortBy, sortOrder]);
 
   if (authChecking) {
     return (
