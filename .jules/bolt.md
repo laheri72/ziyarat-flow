@@ -1,0 +1,3 @@
+## 2025-02-28 - Optimize List Filtering by Hoisting .toLowerCase()
+**Learning:** During heavy frontend list filtering (e.g. `filteredAssignments` in Dashboard or `filteredProgress` in Admin), repeatedly calling `searchQuery.toLowerCase()` inside the `filter` callback for every item performs redundant string operations, blocking the main thread, especially as the list size grows. This synchronous bottleneck gets exponentially worse with larger lists.
+**Action:** Always hoist invariant derivations like `searchQuery.toLowerCase()` outside of loop callbacks such as `.filter()` or `.map()`, and ideally wrap the entire derivation sequence in a `useMemo` so it's only re-computed when the dependencies (data array or search query) actually change.
