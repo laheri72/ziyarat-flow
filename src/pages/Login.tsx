@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,32 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
+
+  // Auto-login via URL parameters (e.g. ?tr=25687)
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const autoTr = searchParams.get("tr") || searchParams.get("tr_number") || searchParams.get("autologin");
+
+    if (autoTr && autoTr.trim()) {
+      const trimmedTr = autoTr.trim();
+      setIdentifier(trimmedTr);
+      setLoading(true);
+      setError("");
+
+      loginStudent(trimmedTr).then((result) => {
+        if (result.success) {
+          navigate("/dashboard", { replace: true });
+        } else {
+          setError(result.error || "Auto-login failed");
+          setLoading(false);
+        }
+      }).catch((err) => {
+        console.error("Auto-login error:", err);
+        setError("Auto-login failed");
+        setLoading(false);
+      });
+    }
+  }, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,7 +118,7 @@ export default function Login() {
             </Button>
           </form>
 
-          {/* Footer with my link to github */}
+          {/* Footer with link to github */}
           <p className="mt-8 text-center text-xs text-muted-foreground">
             For Talabat of Al Jamea tus Saifiyah only <br></br>
             made by <a
