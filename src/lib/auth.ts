@@ -30,8 +30,8 @@ export async function loginStudent(identifier: string): Promise<{ success: boole
     return { success: false, error: "Access denied" };
   }
 
-  // Create session
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  // Create session with 90-day expiry for persistent mobile usage
+  const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
   const { data: session, error: sessionError } = await supabase
     .from("student_sessions")
     .insert({
@@ -64,7 +64,11 @@ export function getSession(): StudentSession | null {
 
   try {
     const session = JSON.parse(stored) as StudentSession;
-    if (new Date(session.expires_at) < new Date()) {
+    // If expired, but currently offline, allow student to view their cached paper list
+    if (session.expires_at && new Date(session.expires_at) < new Date()) {
+      if (!navigator.onLine) {
+        return session;
+      }
       localStorage.removeItem(SESSION_KEY);
       return null;
     }
@@ -77,11 +81,15 @@ export function getSession(): StudentSession | null {
 
 export async function logout(): Promise<void> {
   const session = getSession();
-  if (session) {
-    await supabase
-      .from("student_sessions")
-      .delete()
-      .eq("id", session.session_id);
+  if (session && navigator.onLine) {
+    try {
+      await supabase
+        .from("student_sessions")
+        .delete()
+        .eq("id", session.session_id);
+    } catch (e) {
+      console.warn("Logout session delete error:", e);
+    }
   }
   localStorage.removeItem(SESSION_KEY);
 }

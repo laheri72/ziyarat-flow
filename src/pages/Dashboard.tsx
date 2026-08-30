@@ -32,14 +32,20 @@ import { toast } from "sonner";
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [session, setSession] = useState<StudentSession | null>(null);
+  const [session, setSession] = useState<StudentSession | null>(() => getSession());
   const [searchQuery, setSearchQuery] = useState("");
-  const [availableInMumbai, setAvailableInMumbai] = useState(false);
-  const [currentEvent, setCurrentEvent] = useState("");
+  const [availableInMumbai, setAvailableInMumbai] = useState(() => {
+    const s = getSession();
+    return s ? localStorage.getItem(`ziyarat_available_${s.tr_number}`) === "true" : false;
+  });
+  const [currentEvent, setCurrentEvent] = useState(() => localStorage.getItem("ziyarat_current_event") || "");
   const [loadingAvailability, setLoadingAvailability] = useState(false);
   const [compactMode, setCompactMode] = useState(false);
   const [needsAvailabilitySelection, setNeedsAvailabilitySelection] = useState(false);
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [isInitialLoad, setIsInitialLoad] = useState(() => {
+    const s = getSession();
+    return s ? localStorage.getItem(`ziyarat_available_${s.tr_number}`) === null : true;
+  });
   const [whatsappTemplate, setWhatsappTemplate] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
   const [emailBody, setEmailBody] = useState("");
@@ -87,11 +93,6 @@ export default function Dashboard() {
     !!currentEvent && availableInMumbai && (currentEventTotal === 0 || isCurrentEventFullyCompleted);
 
   useEffect(() => {
-    if (!session?.tr_number || !currentEvent) return;
-    checkActiveAssignmentRequest(session.tr_number);
-  }, [session?.tr_number, currentEvent]);
-
-  useEffect(() => {
     // Only show this tip on first-time / zero-assignments state (per session+event).
     if (!session || !currentEvent || !availableInMumbai || currentEventTotal > 0) {
       setShowAvailabilityBanner(false);
@@ -118,38 +119,51 @@ export default function Dashboard() {
 
 
   const fetchCurrentEvent = async () => {
-    const { data } = await supabase
-      .from("app_settings")
-      .select("setting_value")
-      .eq("setting_key", "current_event_for_availability")
-      .single();
-    
-    if (data) {
-      setCurrentEvent(data.setting_value || "");
+    try {
+      const { data } = await supabase
+        .from("app_settings")
+        .select("setting_value")
+        .eq("setting_key", "current_event_for_availability")
+        .single();
+      
+      if (data?.setting_value) {
+        setCurrentEvent(data.setting_value);
+        localStorage.setItem("ziyarat_current_event", data.setting_value);
+      }
+    } catch (e) {
+      console.warn("Using cached current event:", e);
     }
   };
 
   const fetchMessageTemplates = async () => {
-    const [whatsapp, emailSubj, emailBod] = await Promise.all([
-      supabase.from("app_settings").select("setting_value").eq("setting_key", "whatsapp_message_template").single(),
-      supabase.from("app_settings").select("setting_value").eq("setting_key", "email_message_subject").single(),
-      supabase.from("app_settings").select("setting_value").eq("setting_key", "email_message_body").single(),
-    ]);
+    try {
+      const [whatsapp, emailSubj, emailBod] = await Promise.all([
+        supabase.from("app_settings").select("setting_value").eq("setting_key", "whatsapp_message_template").single(),
+        supabase.from("app_settings").select("setting_value").eq("setting_key", "email_message_subject").single(),
+        supabase.from("app_settings").select("setting_value").eq("setting_key", "email_message_body").single(),
+      ]);
 
-    setWhatsappTemplate(whatsapp.data?.setting_value || "Afzal Us Salam\n\nKem cho?\n\nHame Darajah 11 1449H batch che from Al Jamea tus Saifiyah.\n\nSyedna Taher Saifuddin Aqa RA na Urus Mubarak na Ayyam ma hame ye aapna taraf si naam lai ne Rauzat Tahera ma bewe Moula ni zyarat kidi che.\n\nThis amal has been done as a part of khidmat from HadiAshar 1449 batch.\n\nKhuda sagla mumineen ne Rauzat Tahera ni zyarat naseeb kare.\n\nWasalaam");
-    setEmailSubject(emailSubj.data?.setting_value || "Ziyarat Khidmat - Rawdat Tahera");
-    setEmailBody(emailBod.data?.setting_value || "Afzal Us Salam\n\nKem cho?\n\nHame ye Syedna Taher Saifuddin Aqa RA na Urus Mubarak na Ayyam ma aapna taraf si naam lai ne Rauzat Tahera ma bewe Moula ni zyarat kidi che.\n\nThis amal has been done as a part of khidmat from HadiAshar 1449 batch.\n\nKhuda sagla mumineen ne Rauzat Tahera ni zyarat naseeb kare.\n\nWasalaam");
+      if (whatsapp.data?.setting_value) setWhatsappTemplate(whatsapp.data.setting_value);
+      if (emailSubj.data?.setting_value) setEmailSubject(emailSubj.data.setting_value);
+      if (emailBod.data?.setting_value) setEmailBody(emailBod.data.setting_value);
+    } catch (e) {
+      console.warn("Using default message templates:", e);
+    }
   };
 
   const checkActiveUnassignmentRequest = async (trNumber: string) => {
-    const { data } = await supabase
-      .from("unassignment_requests")
-      .select("id")
-      .eq("student_tr_number", trNumber)
-      .eq("status", "pending")
-      .single();
-    
-    setHasActiveRequest(!!data);
+    try {
+      const { data } = await supabase
+        .from("unassignment_requests")
+        .select("id")
+        .eq("student_tr_number", trNumber)
+        .eq("status", "pending")
+        .maybeSingle();
+      
+      setHasActiveRequest(!!data);
+    } catch (e) {
+      console.warn("Could not check unassignment request:", e);
+    }
   };
   const requestUnassignment = async () => {
     if (!session || !currentEvent) return;
@@ -343,50 +357,64 @@ export default function Dashboard() {
   };
 
   const fetchAvailabilityStatus = async (trNumber: string) => {
-    const { data } = await supabase
-      .from("students")
-      .select("available_in_mumbai, availability_updated_at")
-      .eq("tr_number", trNumber)
-      .single();
-    
-    if (data) {
-      const isAvailable = data.available_in_mumbai === true;
-      setAvailableInMumbai(isAvailable);
-      // Show modal for anyone who is NOT available (including first-time users)
-      setNeedsAvailabilitySelection(!isAvailable);
+    try {
+      const { data } = await supabase
+        .from("students")
+        .select("available_in_mumbai, availability_updated_at")
+        .eq("tr_number", trNumber)
+        .maybeSingle();
+      
+      if (data) {
+        const isAvailable = data.available_in_mumbai === true;
+        setAvailableInMumbai(isAvailable);
+        localStorage.setItem(`ziyarat_available_${trNumber}`, String(isAvailable));
+        setNeedsAvailabilitySelection(!isAvailable);
+      }
+    } catch (e) {
+      console.warn("Using cached availability status:", e);
+    } finally {
+      setIsInitialLoad(false);
     }
-    setIsInitialLoad(false);
   };
 
   const toggleAvailability = async () => {
     if (!session) return;
     
     vibrate([50, 50, 100]); // Haptic feedback
-    setLoadingAvailability(true);
-    try {
-      const newStatus = !availableInMumbai;
-      const { error } = await supabase
-        .from("students")
-        .update({
-          available_in_mumbai: newStatus,
-          availability_updated_at: new Date().toISOString(),
-        })
-        .eq("tr_number", session.tr_number);
+    const newStatus = !availableInMumbai;
+    setAvailableInMumbai(newStatus);
+    localStorage.setItem(`ziyarat_available_${session.tr_number}`, String(newStatus));
+    setNeedsAvailabilitySelection(false);
 
-      if (error) throw error;
+    if (navigator.onLine) {
+      setLoadingAvailability(true);
+      try {
+        const { error } = await supabase
+          .from("students")
+          .update({
+            available_in_mumbai: newStatus,
+            availability_updated_at: new Date().toISOString(),
+          })
+          .eq("tr_number", session.tr_number);
 
-      setAvailableInMumbai(newStatus);
-      setNeedsAvailabilitySelection(false);
+        if (error) throw error;
+
+        toast.success(
+          newStatus
+            ? "Marked as available in Mumbai"
+            : "Marked as unavailable in Mumbai"
+        );
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoadingAvailability(false);
+      }
+    } else {
       toast.success(
         newStatus
-          ? "Marked as available in Mumbai"
-          : "Marked as unavailable in Mumbai"
+          ? "Marked as available in Mumbai (offline)"
+          : "Marked as unavailable in Mumbai (offline)"
       );
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to update availability");
-    } finally {
-      setLoadingAvailability(false);
     }
   };
 
