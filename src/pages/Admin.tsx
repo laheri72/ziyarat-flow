@@ -272,58 +272,86 @@ export default function Admin() {
   };
 
   const fetchStudentProgress = async () => {
-    const { data: students } = await supabase
-      .from("students")
-      .select("tr_number, name, branch, available_in_mumbai")
-      .eq("is_active", true)
-      .order("name");
+    try {
+      // 1. Fetch all active students with pagination
+      const allStudents: Array<{
+        tr_number: string;
+        name: string;
+        branch: string | null;
+        available_in_mumbai: boolean | null;
+      }> = [];
+      let studentOffset = 0;
+      const batchSize = 1000;
 
-    if (!students || students.length === 0) return;
+      while (true) {
+        const { data: students, error: studentError } = await supabase
+          .from("students")
+          .select("tr_number, name, branch, available_in_mumbai")
+          .eq("is_active", true)
+          .order("name")
+          .range(studentOffset, studentOffset + batchSize - 1);
 
-    const studentTrs = students.map((s) => s.tr_number).filter(Boolean);
-    const assignmentStats = new Map<string, { assigned: number; completed: number }>();
-    const chunkSize = 200;
+        if (studentError) throw studentError;
+        if (!students || students.length === 0) break;
 
-    for (let i = 0; i < studentTrs.length; i += chunkSize) {
-      const chunk = studentTrs.slice(i, i + chunkSize);
-      const { data: assignments, error } = await supabase
-        .from("assignments")
-        .select("student_tr_number, status")
-        .in("student_tr_number", chunk);
-
-      if (error) {
-        console.error("Error fetching assignments chunk:", error);
-        continue;
+        allStudents.push(...students);
+        studentOffset += batchSize;
       }
 
-      if (assignments) {
+      if (allStudents.length === 0) {
+        setStudentProgress([]);
+        return;
+      }
+
+      // 2. Fetch ALL assignments with pagination (no 1000 row truncation)
+      const assignmentStats = new Map<string, { assigned: number; completed: number }>();
+      let assignmentOffset = 0;
+
+      while (true) {
+        const { data: assignments, error: assignmentError } = await supabase
+          .from("assignments")
+          .select("student_tr_number, status")
+          .order("id")
+          .range(assignmentOffset, assignmentOffset + batchSize - 1);
+
+        if (assignmentError) throw assignmentError;
+        if (!assignments || assignments.length === 0) break;
+
         for (const assignment of assignments) {
           if (!assignment.student_tr_number) continue;
-          let stats = assignmentStats.get(assignment.student_tr_number);
+          const normalizedTr = assignment.student_tr_number.trim();
+
+          let stats = assignmentStats.get(normalizedTr);
           if (!stats) {
             stats = { assigned: 0, completed: 0 };
-            assignmentStats.set(assignment.student_tr_number, stats);
+            assignmentStats.set(normalizedTr, stats);
           }
           stats.assigned += 1;
           if (assignment.status === "completed") {
             stats.completed += 1;
           }
         }
+
+        assignmentOffset += batchSize;
       }
+
+      // 3. Map students with their exact stats
+      const progress = allStudents.map((student) => {
+        const normalizedTr = (student.tr_number || "").trim();
+        const stats = assignmentStats.get(normalizedTr) || { assigned: 0, completed: 0 };
+        return {
+          ...student,
+          branch: student.branch || "",
+          assigned: stats.assigned,
+          completed: stats.completed,
+          available_in_mumbai: student.available_in_mumbai || false,
+        };
+      });
+
+      setStudentProgress(progress);
+    } catch (err) {
+      console.error("Error fetching student progress:", err);
     }
-
-    const progress = students.map((student) => {
-      const stats = assignmentStats.get(student.tr_number) || { assigned: 0, completed: 0 };
-      return {
-        ...student,
-        branch: student.branch || "",
-        assigned: stats.assigned,
-        completed: stats.completed,
-        available_in_mumbai: student.available_in_mumbai || false,
-      };
-    });
-
-    setStudentProgress(progress);
   };
 
   const fetchEventAnalytics = async () => {
