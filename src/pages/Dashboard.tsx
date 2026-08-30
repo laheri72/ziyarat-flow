@@ -449,26 +449,6 @@ export default function Dashboard() {
         toast.success("Mubarak! All Ziyarat assignments completed! 🎉", {
           duration: 4000,
         });
-      } else {
-        // Auto-scroll smoothly to the next pending beneficiary
-        setTimeout(() => {
-          const nextInEvent = assignments.find(
-            (a) =>
-              a.id !== id &&
-              a.status === "pending" &&
-              a.event_tag === eventTag
-          );
-          const nextAny = assignments.find(
-            (a) => a.id !== id && a.status === "pending"
-          );
-          const target = nextInEvent || nextAny;
-          if (target) {
-            const el = document.getElementById(`assignment-${target.id}`);
-            if (el) {
-              el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-            }
-          }
-        }, 180);
       }
     }
   };
@@ -1223,8 +1203,7 @@ function AssignmentRow({
   if (compactMode) {
     return (
       <div 
-        id={`assignment-${assignment.id}`}
-        className="flex items-center gap-2 py-2 px-3 rounded-lg border border-border bg-card cursor-pointer select-none active:scale-[0.98] transition-all hover:bg-muted/50 scroll-mt-28"
+        className="flex items-center gap-2 py-2 px-3 rounded-lg border border-border bg-card cursor-pointer select-none active:scale-[0.98] transition-all hover:bg-muted/50"
         onClick={handleCardClick}
       >
         {/* Checkbox */}
@@ -1289,8 +1268,7 @@ function AssignmentRow({
   // Normal Mode View (Default - Original Style)
   return (
     <div 
-      id={`assignment-${assignment.id}`}
-      className="card-elevated p-4 transition-all duration-200 cursor-pointer select-none active:scale-[0.98] scroll-mt-28" 
+      className="card-elevated p-4 transition-all duration-200 cursor-pointer select-none active:scale-[0.98]" 
       onClick={handleCardClick}
     >
       <div className={`flex items-center gap-4 ${isCompleted ? "opacity-60" : ""}`}>
