@@ -21,6 +21,9 @@ import {
   Users,
   Mail,
   MessageCircle,
+  ChevronDown,
+  CheckCircle2,
+  Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -42,6 +45,7 @@ export default function Dashboard() {
   const [requestingAssignment, setRequestingAssignment] = useState(false);
   const [hasActiveAssignmentRequest, setHasActiveAssignmentRequest] = useState(false);
   const [showAvailabilityBanner, setShowAvailabilityBanner] = useState(false);
+  const [openTags, setOpenTags] = useState<Record<string, boolean>>({});
   
 
   const {
@@ -414,12 +418,56 @@ export default function Dashboard() {
       return acc;
     }, {} as Record<string, Assignment[]>);
 
-    const tags = Object.keys(grouped).sort((a, b) =>
-      a.localeCompare(b)
-    );
+    // Sort assignments inside each group: pending first, then completed!
+    Object.keys(grouped).forEach((tag) => {
+      grouped[tag].sort((a, b) => {
+        if (a.status !== b.status) {
+          return a.status === "pending" ? -1 : 1;
+        }
+        return (a.beneficiary.full_name || "").localeCompare(b.beneficiary.full_name || "");
+      });
+    });
+
+    // Priority-first sorting for events:
+    // 1. Events with pending assignments come first
+    //    - Active currentEvent gets top priority
+    //    - Then sorted by highest pending count descending
+    // 2. Events with 0 pending (100% completed) come after
+    //    - Active currentEvent first, then alphabetical
+    const tags = Object.keys(grouped).sort((a, b) => {
+      const aItems = grouped[a];
+      const bItems = grouped[b];
+      const aPending = aItems.filter((item) => item.status === "pending").length;
+      const bPending = bItems.filter((item) => item.status === "pending").length;
+
+      const aHasPending = aPending > 0;
+      const bHasPending = bPending > 0;
+
+      // 1. Pending events before completed events
+      if (aHasPending && !bHasPending) return -1;
+      if (!aHasPending && bHasPending) return 1;
+
+      // 2. If both have pending: current active event first, then highest pending count
+      if (aHasPending && bHasPending) {
+        if (currentEvent) {
+          if (a === currentEvent && b !== currentEvent) return -1;
+          if (b === currentEvent && a !== currentEvent) return 1;
+        }
+        if (bPending !== aPending) {
+          return bPending - aPending;
+        }
+      }
+
+      // 3. If both are completed: current active event first, then alphabetical
+      if (currentEvent) {
+        if (a === currentEvent && b !== currentEvent) return -1;
+        if (b === currentEvent && a !== currentEvent) return 1;
+      }
+      return a.localeCompare(b);
+    });
 
     return { filteredAssignments: filtered, groupedAssignments: grouped, groupedEventTags: tags };
-  }, [assignments, searchQuery]);
+  }, [assignments, searchQuery, currentEvent]);
 
   const assignmentCardTitle = isCurrentEventFullyCompleted
     ? "All done for now!"
@@ -892,38 +940,157 @@ export default function Dashboard() {
               {!searchQuery && canRequestMoreForCurrentEvent && assignmentRequestCard}
             </div>
           ) : (
-            <div className="space-y-6">
-              {groupedEventTags.map((tag) => (
-                <details key={tag} className="card-elevated p-3">
-                  <summary className="list-none cursor-pointer -mx-3 px-3 py-2 rounded-t-lg flex items-center justify-between gap-3 hover:bg-muted/40">
-                    <div className="min-w-0">
-                      <h3 className="text-sm font-semibold text-foreground truncate">
-                        {tag}
-                      </h3>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {groupedAssignments[tag].filter((a) => a.status === "completed").length}/
-                        {groupedAssignments[tag].length} completed
-                      </p>
+            <div className="space-y-4">
+              {groupedEventTags.map((tag) => {
+                const items = groupedAssignments[tag];
+                const completedInGroup = items.filter((a) => a.status === "completed").length;
+                const totalInGroup = items.length;
+                const pendingInGroup = totalInGroup - completedInGroup;
+                const isFullyCompleted = totalInGroup > 0 && pendingInGroup === 0;
+                const isCurrent = tag === currentEvent;
+                const groupProgress = totalInGroup > 0 ? Math.round((completedInGroup / totalInGroup) * 100) : 0;
+
+                // Priority auto-open: Pending event or active search opens by default!
+                const isOpen =
+                  openTags[tag] !== undefined
+                    ? openTags[tag]
+                    : pendingInGroup > 0 || !!searchQuery;
+
+                return (
+                  <div
+                    key={tag}
+                    className={`rounded-xl border transition-all duration-200 shadow-sm overflow-hidden ${
+                      isFullyCompleted
+                        ? "bg-emerald-50/25 dark:bg-emerald-950/10 border-emerald-300/70 dark:border-emerald-900/40"
+                        : "bg-card border-2 border-amber-500/60 dark:border-amber-500/50 shadow-md ring-1 ring-amber-500/20"
+                    }`}
+                  >
+                    {/* Header Summary / Trigger */}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        vibrate(30);
+                        setOpenTags((prev) => ({
+                          ...prev,
+                          [tag]: !isOpen,
+                        }));
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          vibrate(30);
+                          setOpenTags((prev) => ({
+                            ...prev,
+                            [tag]: !isOpen,
+                          }));
+                        }
+                      }}
+                      className={`w-full text-left p-3.5 sm:p-4 flex flex-col gap-2.5 cursor-pointer select-none transition-colors ${
+                        isFullyCompleted
+                          ? "hover:bg-emerald-100/40 dark:hover:bg-emerald-900/20"
+                          : "hover:bg-amber-500/10 dark:hover:bg-amber-950/30 bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`p-2 rounded-lg flex-shrink-0 ${
+                              isFullyCompleted
+                                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                                : "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                            }`}
+                          >
+                            {isFullyCompleted ? (
+                              <CheckCircle2 className="w-5 h-5" />
+                            ) : (
+                              <Clock className="w-5 h-5" />
+                            )}
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="text-base font-bold text-foreground truncate">
+                                {tag}
+                              </h3>
+                              {isCurrent && (
+                                <span className="px-2 py-0.5 text-[10px] font-bold tracking-wide uppercase rounded-full bg-primary text-primary-foreground">
+                                  Current
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground flex-wrap">
+                              <span>
+                                {completedInGroup} / {totalInGroup} completed
+                              </span>
+                              <span>•</span>
+                              <span>{groupProgress}%</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {isFullyCompleted ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                              <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                              All Done
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 shadow-sm">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping inline-block" />
+                              {pendingInGroup} Pending
+                            </span>
+                          )}
+                          <div
+                            className={`p-1.5 rounded-full hover:bg-muted/80 text-muted-foreground transition-transform duration-200 ${
+                              isOpen ? "rotate-180" : ""
+                            }`}
+                          >
+                            <ChevronDown className="w-4 h-4" />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Mini Progress Bar for each event */}
+                      <div className="w-full bg-muted/60 dark:bg-muted/30 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ease-out ${
+                            isFullyCompleted
+                              ? "bg-emerald-500"
+                              : "bg-gradient-to-r from-amber-500 to-amber-600"
+                          }`}
+                          style={{ width: `${groupProgress}%` }}
+                        />
+                      </div>
                     </div>
-                    <span className="text-xs text-muted-foreground">
-                      {groupedAssignments[tag].length} total
-                    </span>
-                  </summary>
-                  <div className="space-y-1.5 pt-3">
-                    {groupedAssignments[tag].map((assignment) => (
-                      <AssignmentRow
-                        key={assignment.id}
-                        assignment={assignment}
-                        onToggle={toggleStatus}
-                        compactMode={compactMode}
-                        whatsappTemplate={whatsappTemplate}
-                        emailSubject={emailSubject}
-                        emailBody={emailBody}
-                      />
-                    ))}
+
+                    {/* Collapsible Content */}
+                    {isOpen && (
+                      <div className="p-3 sm:p-4 pt-1 space-y-2 border-t border-border/60 bg-card/60">
+                        {!isFullyCompleted && pendingInGroup > 0 && (
+                          <div className="flex items-center justify-between text-xs text-amber-800 dark:text-amber-300 bg-amber-500/10 px-3 py-1.5 rounded-md mb-2 font-medium border border-amber-500/20">
+                            <span>Tap any beneficiary below to mark Ziyarat as done</span>
+                            <span className="font-semibold">{pendingInGroup} remaining</span>
+                          </div>
+                        )}
+                        <div className="space-y-1.5">
+                          {items.map((assignment) => (
+                            <AssignmentRow
+                              key={assignment.id}
+                              assignment={assignment}
+                              onToggle={toggleStatus}
+                              compactMode={compactMode}
+                              whatsappTemplate={whatsappTemplate}
+                              emailSubject={emailSubject}
+                              emailBody={emailBody}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </details>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
