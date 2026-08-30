@@ -24,6 +24,9 @@ import {
   ChevronDown,
   CheckCircle2,
   Clock,
+  Sparkles,
+  Trophy,
+  ArrowRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -397,6 +400,49 @@ export default function Dashboard() {
   const handleLogout = async () => {
     await logout();
     navigate("/");
+  };
+
+  const handleToggleAssignment = (
+    id: string,
+    currentStatus: "pending" | "completed",
+    eventTag?: string | null
+  ) => {
+    const nextStatus = currentStatus === "pending" ? "completed" : "pending";
+    toggleStatus(id, currentStatus);
+
+    if (nextStatus === "completed") {
+      // Check if all are now completed
+      const remainingPending = assignments.filter(
+        (a) => a.id !== id && a.status === "pending"
+      ).length;
+
+      if (remainingPending === 0) {
+        vibrate([100, 50, 150, 50, 200]);
+        toast.success("Mubarak! All Ziyarat assignments completed! 🎉", {
+          duration: 4000,
+        });
+      } else {
+        // Auto-scroll smoothly to the next pending beneficiary
+        setTimeout(() => {
+          const nextInEvent = assignments.find(
+            (a) =>
+              a.id !== id &&
+              a.status === "pending" &&
+              a.event_tag === eventTag
+          );
+          const nextAny = assignments.find(
+            (a) => a.id !== id && a.status === "pending"
+          );
+          const target = nextInEvent || nextAny;
+          if (target) {
+            const el = document.getElementById(`assignment-${target.id}`);
+            if (el) {
+              el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            }
+          }
+        }, 180);
+      }
+    }
   };
 
   const { filteredAssignments, groupedAssignments, groupedEventTags } = useMemo(() => {
@@ -928,10 +974,10 @@ export default function Dashboard() {
 
       {/* Assignments List */}
       <main className="flex-1 py-4 px-4">
-        <div className="container max-w-4xl mx-auto">
+        <div className="container max-w-4xl mx-auto space-y-4">
           {filteredAssignments.length === 0 ? (
             <div className="space-y-4">
-              <div className="text-center py-8 text-muted-foreground">
+              <div className="text-center py-8 text-muted-foreground card-elevated p-6">
                 {searchQuery
                   ? "No matching records found"
                   : "No assignments yet"}
@@ -1078,7 +1124,9 @@ export default function Dashboard() {
                             <AssignmentRow
                               key={assignment.id}
                               assignment={assignment}
-                              onToggle={toggleStatus}
+                              onToggle={(id, status) =>
+                                handleToggleAssignment(id, status, assignment.event_tag)
+                              }
                               compactMode={compactMode}
                               whatsappTemplate={whatsappTemplate}
                               emailSubject={emailSubject}
@@ -1147,7 +1195,8 @@ function AssignmentRow({
   if (compactMode) {
     return (
       <div 
-        className="flex items-center gap-2 py-2 px-3 rounded-lg border border-border bg-card cursor-pointer select-none active:scale-[0.98] transition-all hover:bg-muted/50"
+        id={`assignment-${assignment.id}`}
+        className="flex items-center gap-2 py-2 px-3 rounded-lg border border-border bg-card cursor-pointer select-none active:scale-[0.98] transition-all hover:bg-muted/50 scroll-mt-28"
         onClick={handleCardClick}
       >
         {/* Checkbox */}
@@ -1211,7 +1260,11 @@ function AssignmentRow({
 
   // Normal Mode View (Default - Original Style)
   return (
-    <div className="card-elevated p-4 transition-all duration-200 cursor-pointer select-none active:scale-[0.98]" onClick={handleCardClick}>
+    <div 
+      id={`assignment-${assignment.id}`}
+      className="card-elevated p-4 transition-all duration-200 cursor-pointer select-none active:scale-[0.98] scroll-mt-28" 
+      onClick={handleCardClick}
+    >
       <div className={`flex items-center gap-4 ${isCompleted ? "opacity-60" : ""}`}>
         {/* Checkbox */}
         <div
