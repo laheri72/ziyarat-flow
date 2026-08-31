@@ -103,6 +103,14 @@ export default function Admin() {
     current_assignments: number;
   }>>([]);
 
+  // ⚡ Bolt: Memoized available/unavailable students to avoid redundant filtering on every render
+  const { availableInMumbaiStudents, otherStudents } = useMemo(() => {
+    return {
+      availableInMumbaiStudents: availableStudents.filter(s => s.available_in_mumbai),
+      otherStudents: availableStudents.filter(s => !s.available_in_mumbai)
+    };
+  }, [availableStudents]);
+
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
       toast.error("Email and password are required");
@@ -799,9 +807,7 @@ export default function Admin() {
   };
 
   const selectAllAvailable = () => {
-    const availableTrNumbers = availableStudents
-      .filter(s => s.available_in_mumbai)
-      .map(s => s.tr_number);
+    const availableTrNumbers = availableInMumbaiStudents.map(s => s.tr_number);
     setSelectedStudents(new Set(availableTrNumbers));
   };
 
@@ -1950,7 +1956,7 @@ export default function Admin() {
                       onClick={selectAllAvailable}
                       className="text-green-600 border-green-600 hover:bg-green-50 dark:hover:bg-green-950"
                     >
-                      Select All Available ({availableStudents.filter(s => s.available_in_mumbai).length})
+                      Select All Available ({availableInMumbaiStudents.length})
                     </Button>
                     <Button size="sm" variant="outline" onClick={selectAll}>
                       Select All ({availableStudents.length})
@@ -1984,16 +1990,15 @@ export default function Admin() {
                 {/* Students List */}
                 <div className="space-y-2 max-h-96 overflow-y-auto mb-4">
                   {/* Available Students - Green Section */}
-                  {availableStudents.filter(s => s.available_in_mumbai).length > 0 && (
+                  {availableInMumbaiStudents.length > 0 && (
                     <div className="mb-4">
                       <div className="flex items-center gap-2 mb-2 sticky top-0 bg-background py-2">
                         <div className="w-3 h-3 rounded-full bg-green-500"></div>
                         <h4 className="font-medium text-sm text-green-600 dark:text-green-400">
-                          Available in Mumbai ({availableStudents.filter(s => s.available_in_mumbai).length})
+                          Available in Mumbai ({availableInMumbaiStudents.length})
                         </h4>
                       </div>
-                      {availableStudents
-                        .filter(s => s.available_in_mumbai)
+                      {availableInMumbaiStudents
                         .map((student) => (
                           <label
                             key={student.tr_number}
@@ -2020,16 +2025,15 @@ export default function Admin() {
                   )}
 
                   {/* Other Students */}
-                  {availableStudents.filter(s => !s.available_in_mumbai).length > 0 && (
+                  {otherStudents.length > 0 && (
                     <div>
                       <div className="flex items-center gap-2 mb-2 sticky top-0 bg-background py-2">
                         <div className="w-3 h-3 rounded-full bg-gray-400"></div>
                         <h4 className="font-medium text-sm text-muted-foreground">
-                          Other Students ({availableStudents.filter(s => !s.available_in_mumbai).length})
+                          Other Students ({otherStudents.length})
                         </h4>
                       </div>
-                      {availableStudents
-                        .filter(s => !s.available_in_mumbai)
+                      {otherStudents
                         .map((student) => (
                           <label
                             key={student.tr_number}
