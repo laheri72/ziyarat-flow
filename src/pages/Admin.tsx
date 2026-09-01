@@ -2212,18 +2212,21 @@ export default function Admin() {
                       </option>
                     ))}
                 </select>
-                {selectedEventForUnassign && eventAnalytics.find(e => e.event_tag === selectedEventForUnassign) && (
+                {(() => {
+                  const selectedEvent = selectedEventForUnassign ? eventAnalytics.find(e => e.event_tag === selectedEventForUnassign) : null;
+                  if (!selectedEvent) return null;
+                  return (
                   <div className="mb-3 p-3 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-900 rounded-md text-sm">
                     <p className="font-medium text-orange-900 dark:text-orange-100 mb-1">
-                      {eventAnalytics.find(e => e.event_tag === selectedEventForUnassign)?.event_tag}
+                      {selectedEvent.event_tag}
                     </p>
                     <div className="text-orange-700 dark:text-orange-300 space-y-0.5">
-                      <p>Total: {eventAnalytics.find(e => e.event_tag === selectedEventForUnassign)?.total}</p>
-                      <p>Completed: {eventAnalytics.find(e => e.event_tag === selectedEventForUnassign)?.completed} ✓</p>
-                      <p className="font-semibold">Pending: {eventAnalytics.find(e => e.event_tag === selectedEventForUnassign)?.pending} (will be unassigned)</p>
+                      <p>Total: {selectedEvent.total}</p>
+                      <p>Completed: {selectedEvent.completed} ✓</p>
+                      <p className="font-semibold">Pending: {selectedEvent.pending} (will be unassigned)</p>
                     </div>
                   </div>
-                )}
+                )})()}
                 <Button
                   variant="outline"
                   onClick={unassignPending}
