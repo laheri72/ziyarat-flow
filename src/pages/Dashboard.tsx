@@ -482,6 +482,17 @@ export default function Dashboard() {
       });
     });
 
+    // ⚡ Bolt: Pre-calculate pending counts to avoid O(N) filter operations inside the O(N log N) sort comparator
+    const pendingCounts = Object.keys(grouped).reduce((acc, tag) => {
+      let count = 0;
+      const items = grouped[tag];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].status === "pending") count++;
+      }
+      acc[tag] = count;
+      return acc;
+    }, {} as Record<string, number>);
+
     // Priority-first sorting for events:
     // 1. Events with pending assignments come first
     //    - Active currentEvent gets top priority
@@ -489,10 +500,8 @@ export default function Dashboard() {
     // 2. Events with 0 pending (100% completed) come after
     //    - Active currentEvent first, then alphabetical
     const tags = Object.keys(grouped).sort((a, b) => {
-      const aItems = grouped[a];
-      const bItems = grouped[b];
-      const aPending = aItems.filter((item) => item.status === "pending").length;
-      const bPending = bItems.filter((item) => item.status === "pending").length;
+      const aPending = pendingCounts[a];
+      const bPending = pendingCounts[b];
 
       const aHasPending = aPending > 0;
       const bHasPending = bPending > 0;
