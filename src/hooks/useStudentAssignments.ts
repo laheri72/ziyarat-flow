@@ -178,6 +178,7 @@ export function useStudentAssignments() {
         .order("beneficiary_its_id", { ascending: true });
 
       const response = await Promise.race([fetchPromise, timeoutPromise]);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error: fetchError } = response as { data: any[] | null; error: any };
 
       if (fetchError) throw fetchError;
