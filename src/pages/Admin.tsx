@@ -303,36 +303,52 @@ export default function Admin() {
         return;
       }
 
-      // 2. Fetch ALL assignments with pagination (no 1000 row truncation)
+      // 2. Fetch assignments for active students in chunks to avoid querying entire table
       const assignmentStats = new Map<string, { assigned: number; completed: number }>();
-      let assignmentOffset = 0;
+      const studentTrs = allStudents.map(s => s.tr_number).filter(Boolean);
+      const CHUNK_SIZE = 50;
 
-      while (true) {
-        const { data: assignments, error: assignmentError } = await supabase
-          .from("assignments")
-          .select("student_tr_number, status")
-          .order("id")
-          .range(assignmentOffset, assignmentOffset + batchSize - 1);
+      // ⚡ Bolt: Replaced inefficient full-table scan with chunked `.in()` queries to prevent excessive memory usage and scalability regressions
+      // Processing chunks sequentially to avoid overwhelming the database with unbounded concurrent requests
+      for (let index = 0; index < Math.ceil(studentTrs.length / CHUNK_SIZE); index++) {
+        const chunk = studentTrs.slice(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE);
+        if (chunk.length === 0) continue;
 
-        if (assignmentError) throw assignmentError;
-        if (!assignments || assignments.length === 0) break;
+        let assignmentOffset = 0;
+        const fetchBatchSize = 1000;
 
-        for (const assignment of assignments) {
-          if (!assignment.student_tr_number) continue;
-          const normalizedTr = assignment.student_tr_number.trim();
+        while(true) {
+          const { data: assignments, error: assignmentError } = await supabase
+            .from("assignments")
+            .select("student_tr_number, status")
+            .in("student_tr_number", chunk)
+            .order("id")
+            .range(assignmentOffset, assignmentOffset + fetchBatchSize - 1);
 
-          let stats = assignmentStats.get(normalizedTr);
-          if (!stats) {
-            stats = { assigned: 0, completed: 0 };
-            assignmentStats.set(normalizedTr, stats);
+          if (assignmentError) {
+            console.error("Error fetching assignments chunk:", assignmentError);
+            throw assignmentError;
           }
-          stats.assigned += 1;
-          if (assignment.status === "completed") {
-            stats.completed += 1;
+
+          if (!assignments || assignments.length === 0) break;
+
+          for (const assignment of assignments) {
+            if (!assignment.student_tr_number) continue;
+            const normalizedTr = assignment.student_tr_number.trim();
+
+            let stats = assignmentStats.get(normalizedTr);
+            if (!stats) {
+              stats = { assigned: 0, completed: 0 };
+              assignmentStats.set(normalizedTr, stats);
+            }
+            stats.assigned += 1;
+            if (assignment.status === "completed") {
+              stats.completed += 1;
+            }
           }
+
+          assignmentOffset += fetchBatchSize;
         }
-
-        assignmentOffset += batchSize;
       }
 
       // 3. Map students with their exact stats
@@ -357,7 +373,10 @@ export default function Admin() {
   const fetchEventAnalytics = async () => {
     try {
       // Fetch ALL assignments with pagination
-      const allAssignments = [];
+      // ⚡ Bolt: Kept pagination for event analytics as we need all events, but this is a heavy operation.
+      // Ideally this should be a DB view or RPC function, but keeping the JS implementation to avoid architectural changes.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const allAssignments: any[] = [];
       let offset = 0;
       const batchSize = 1000;
       
