@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSession, logout, StudentSession } from "@/lib/auth";
 import { useStudentAssignments, Assignment } from "@/hooks/useStudentAssignments";
@@ -66,6 +66,15 @@ export default function Dashboard() {
     progress,
     refresh,
   } = useStudentAssignments();
+
+  // ⚡ Bolt: Maintain a mutable ref to the latest assignments list.
+  // This allows handleToggleAssignment to calculate remaining completions
+  // without adding `assignments` to its dependency array, which would
+  // break React.memo on the list rows on every single toggle.
+  const assignmentsRef = useRef(assignments);
+  useEffect(() => {
+    assignmentsRef.current = assignments;
+  }, [assignments]);
 
   useEffect(() => {
     const s = getSession();
@@ -430,17 +439,19 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  const handleToggleAssignment = (
+  // ⚡ Bolt: Wrapped handleToggleAssignment in useCallback to provide a stable reference
+  // and prevent unnecessary O(n) re-renders of the AssignmentRow list.
+  // By using assignmentsRef, this callback never changes, allowing React.memo to work perfectly.
+  const handleToggleAssignment = useCallback((
     id: string,
-    currentStatus: "pending" | "completed",
-    eventTag?: string | null
+    currentStatus: "pending" | "completed"
   ) => {
     const nextStatus = currentStatus === "pending" ? "completed" : "pending";
     toggleStatus(id, currentStatus);
 
     if (nextStatus === "completed") {
-      // Check if all are now completed
-      const remainingPending = assignments.filter(
+      // Check if all are now completed using the ref
+      const remainingPending = assignmentsRef.current.filter(
         (a) => a.id !== id && a.status === "pending"
       ).length;
 
@@ -451,7 +462,7 @@ export default function Dashboard() {
         });
       }
     }
-  };
+  }, [toggleStatus]);
 
   const { filteredAssignments, groupedAssignments, groupedEventTags } = useMemo(() => {
     const query = searchQuery ? searchQuery.toLowerCase() : "";
@@ -1132,9 +1143,7 @@ export default function Dashboard() {
                             <AssignmentRow
                               key={assignment.id}
                               assignment={assignment}
-                              onToggle={(id, status) =>
-                                handleToggleAssignment(id, status, assignment.event_tag)
-                              }
+                              onToggle={handleToggleAssignment}
                               compactMode={compactMode}
                               whatsappTemplate={whatsappTemplate}
                               emailSubject={emailSubject}
@@ -1155,7 +1164,9 @@ export default function Dashboard() {
   );
 }
 
-function AssignmentRow({
+// ⚡ Bolt: Wrapped AssignmentRow in React.memo to skip full re-renders of unchanged list
+// items when the parent Dashboard state updates (e.g. during search filtering).
+const AssignmentRow = React.memo(function AssignmentRow({
   assignment,
   onToggle,
   compactMode = false,
@@ -1375,7 +1386,7 @@ function AssignmentRow({
       )}
     </div>
   );
-}
+});
 
 
 
