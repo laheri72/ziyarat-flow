@@ -1,0 +1,3 @@
+## 2024-05-18 - [Optimization of React Components with Array Filtering]
+**Learning:** For React component performance optimization involving list filtering, pull static or derived values like `searchQuery.toLowerCase()` outside of inner loop callbacks (e.g., `.filter()`) to prevent redundant synchronous string operations that block the main thread. Also, using `useMemo` is not enough when inner loop functions re-evaluate unchanged values on every mapped item. Memoizing large lists via `React.memo` and stable callbacks is critical to reduce rendering latency.
+**Action:** Extract `toLowerCase` logic out of array methods (`map`/`filter`/`sort`), and memoize list elements using `React.memo` combined with `useCallback` and `useRef` to guarantee stable references.

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+﻿import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1407,6 +1407,7 @@ export default function Admin() {
     }
   };
 
+  // ⚡ Bolt: Extracted `toLowerCase` operations out of the `.filter` and `.sort` inner callbacks
   const filteredProgress = useMemo(() => {
     const query = searchQuery ? searchQuery.toLowerCase() : "";
 
@@ -1414,9 +1415,9 @@ export default function Admin() {
       .filter((s) => {
         if (!query) return true;
         return (
-          s.name.toLowerCase().includes(query) ||
-          s.tr_number.toLowerCase().includes(query) ||
-          s.branch.toLowerCase().includes(query)
+          (s.name && s.name.toLowerCase().includes(query)) ||
+          (s.tr_number && s.tr_number.toLowerCase().includes(query)) ||
+          (s.branch && s.branch.toLowerCase().includes(query))
         );
       })
       .sort((a, b) => {
@@ -1425,12 +1426,12 @@ export default function Admin() {
 
         switch (sortBy) {
           case "name":
-            aValue = a.name.toLowerCase();
-            bValue = b.name.toLowerCase();
+            aValue = a.name ? a.name.toLowerCase() : "";
+            bValue = b.name ? b.name.toLowerCase() : "";
             break;
           case "branch":
-            aValue = a.branch.toLowerCase();
-            bValue = b.branch.toLowerCase();
+            aValue = a.branch ? a.branch.toLowerCase() : "";
+            bValue = b.branch ? b.branch.toLowerCase() : "";
             break;
           case "assigned":
             aValue = a.assigned;
