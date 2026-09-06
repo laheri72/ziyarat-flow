@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+﻿import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSession, logout, StudentSession } from "@/lib/auth";
 import { useStudentAssignments, Assignment } from "@/hooks/useStudentAssignments";
@@ -430,7 +430,14 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  const handleToggleAssignment = (
+  // ⚡ Bolt: Use a mutable ref to hold the latest assignments array without breaking memoization
+  const assignmentsRef = useRef(assignments);
+  useEffect(() => {
+    assignmentsRef.current = assignments;
+  }, [assignments]);
+
+  // ⚡ Bolt: Wrapped in useCallback to provide a stable reference to AssignmentRow, preventing unnecessary re-renders
+  const handleToggleAssignment = useCallback((
     id: string,
     currentStatus: "pending" | "completed",
     eventTag?: string | null
@@ -440,7 +447,7 @@ export default function Dashboard() {
 
     if (nextStatus === "completed") {
       // Check if all are now completed
-      const remainingPending = assignments.filter(
+      const remainingPending = assignmentsRef.current.filter(
         (a) => a.id !== id && a.status === "pending"
       ).length;
 
@@ -451,7 +458,7 @@ export default function Dashboard() {
         });
       }
     }
-  };
+  }, [toggleStatus]);
 
   const { filteredAssignments, groupedAssignments, groupedEventTags } = useMemo(() => {
     const query = searchQuery ? searchQuery.toLowerCase() : "";
@@ -1132,9 +1139,7 @@ export default function Dashboard() {
                             <AssignmentRow
                               key={assignment.id}
                               assignment={assignment}
-                              onToggle={(id, status) =>
-                                handleToggleAssignment(id, status, assignment.event_tag)
-                              }
+                              onToggle={handleToggleAssignment}
                               compactMode={compactMode}
                               whatsappTemplate={whatsappTemplate}
                               emailSubject={emailSubject}
@@ -1155,7 +1160,8 @@ export default function Dashboard() {
   );
 }
 
-function AssignmentRow({
+// ⚡ Bolt: Wrapped in React.memo to prevent unnecessary re-renders of all list items
+const AssignmentRow = React.memo(function AssignmentRow({
   assignment,
   onToggle,
   compactMode = false,
@@ -1164,7 +1170,7 @@ function AssignmentRow({
   emailBody = "",
 }: {
   assignment: Assignment;
-  onToggle: (id: string, status: "pending" | "completed") => void;
+  onToggle: (id: string, status: "pending" | "completed", eventTag?: string | null) => void;
   compactMode?: boolean;
   whatsappTemplate?: string;
   emailSubject?: string;
@@ -1184,7 +1190,7 @@ function AssignmentRow({
 
   const handleCardClick = () => {
     vibrate(isCompleted ? 50 : [50, 50, 100]);
-    onToggle(assignment.id, assignment.status);
+    onToggle(assignment.id, assignment.status, assignment.event_tag);
   };
 
   const copyContact = (text: string, type: string) => {
@@ -1375,7 +1381,7 @@ function AssignmentRow({
       )}
     </div>
   );
-}
+});
 
 
 
