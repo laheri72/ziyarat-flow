@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSession, logout, StudentSession } from "@/lib/auth";
 import { useStudentAssignments, Assignment } from "@/hooks/useStudentAssignments";
@@ -66,6 +66,13 @@ export default function Dashboard() {
     progress,
     refresh,
   } = useStudentAssignments();
+
+  // ⚡ Bolt: Maintain a mutable ref to the latest assignments array to avoid breaking
+  // the memoization of `handleToggleAssignment` while preventing stale closures.
+  const assignmentsRef = useRef(assignments);
+  useEffect(() => {
+    assignmentsRef.current = assignments;
+  }, [assignments]);
 
   useEffect(() => {
     const s = getSession();
@@ -430,7 +437,8 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  const handleToggleAssignment = (
+  // ⚡ Bolt: Stabilized callback reference to prevent unnecessary re-renders of all AssignmentRow components
+  const handleToggleAssignment = useCallback((
     id: string,
     currentStatus: "pending" | "completed",
     eventTag?: string | null
@@ -440,7 +448,7 @@ export default function Dashboard() {
 
     if (nextStatus === "completed") {
       // Check if all are now completed
-      const remainingPending = assignments.filter(
+      const remainingPending = assignmentsRef.current.filter(
         (a) => a.id !== id && a.status === "pending"
       ).length;
 
@@ -451,7 +459,7 @@ export default function Dashboard() {
         });
       }
     }
-  };
+  }, [toggleStatus]);
 
   const { filteredAssignments, groupedAssignments, groupedEventTags } = useMemo(() => {
     const query = searchQuery ? searchQuery.toLowerCase() : "";
@@ -1155,7 +1163,10 @@ export default function Dashboard() {
   );
 }
 
-function AssignmentRow({
+// ⚡ Bolt: Memoized the row component to prevent re-rendering hundreds of list items
+// when the parent Dashboard state changes (e.g. toggling a single assignment).
+// Expected impact: Eliminates O(N) re-renders, making toggling instantly responsive.
+const AssignmentRow = React.memo(function AssignmentRow({
   assignment,
   onToggle,
   compactMode = false,
@@ -1375,7 +1386,7 @@ function AssignmentRow({
       )}
     </div>
   );
-}
+});
 
 
 
