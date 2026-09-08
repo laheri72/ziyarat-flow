@@ -472,8 +472,14 @@ export default function Dashboard() {
       return acc;
     }, {} as Record<string, Assignment[]>);
 
+    // ⚡ Bolt: Precompute pending counts to avoid O(N^2) filtering inside the sort comparator
+    const pendingCounts: Record<string, number> = {};
+
     // Sort assignments inside each group: pending first, then completed!
     Object.keys(grouped).forEach((tag) => {
+      // Precompute pending count for this group
+      pendingCounts[tag] = grouped[tag].filter((item) => item.status === "pending").length;
+
       grouped[tag].sort((a, b) => {
         if (a.status !== b.status) {
           return a.status === "pending" ? -1 : 1;
@@ -489,10 +495,8 @@ export default function Dashboard() {
     // 2. Events with 0 pending (100% completed) come after
     //    - Active currentEvent first, then alphabetical
     const tags = Object.keys(grouped).sort((a, b) => {
-      const aItems = grouped[a];
-      const bItems = grouped[b];
-      const aPending = aItems.filter((item) => item.status === "pending").length;
-      const bPending = bItems.filter((item) => item.status === "pending").length;
+      const aPending = pendingCounts[a] || 0;
+      const bPending = pendingCounts[b] || 0;
 
       const aHasPending = aPending > 0;
       const bHasPending = bPending > 0;

@@ -1,0 +1,3 @@
+## 2024-05-17 - Optimize O(N^2) Array Filter in Sort Comparator
+**Learning:** In React component `useMemo` hooks, calling `.filter()` inside a `.sort()` comparator function results in O(N^2) complexity because `.filter()` is executed repeatedly for every comparison. This degrades performance when the array being sorted has many elements, which can happen for event groups with many assignments.
+**Action:** Precompute derived values (like pending assignment counts) before sorting, storing them in a lookup map (like `pendingCounts: Record<string, number>`), and reference that map in the sort comparator to achieve O(N log N) performance.
