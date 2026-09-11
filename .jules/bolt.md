@@ -1,0 +1,3 @@
+## 2024-11-20 - [O(N^2) sorting bottleneck inside useMemo]
+**Learning:** [Avoid using `.filter()` (an O(N) operation) directly inside `.sort()` comparators in useMemo hooks. This leads to O(N^2) performance when iterating over list elements, which can cause synchronous main thread blocking and noticeably slow down render cycles as the dataset grows.]
+**Action:** [Precompute the derived values (like counts or filtered arrays) into a lookup dictionary/map before executing the `sort()` operation. This ensures the lookup inside the comparator is O(1), restoring the total operation back to a manageable O(N log N).]
