@@ -1,0 +1,3 @@
+## 2024-11-20 - O(N^2) Filter inside Sort Anti-pattern
+**Learning:** Found a performance bottleneck where `Array.prototype.filter()` was being called inside an `Array.prototype.sort()` comparator in `src/pages/Dashboard.tsx` for tracking pending item counts per event. This turns an $O(N \log N)$ sorting operation into $O(M \cdot N \log N)$ where $M$ is the number of items per event.
+**Action:** Always precompute any derivable length counts or aggregate data into a lookup dictionary (like `pendingCounts`) outside the sort loop. This guarantees the inner sort logic evaluates in strict $O(1)$ time per comparison.
