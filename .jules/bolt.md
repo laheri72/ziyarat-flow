@@ -1,0 +1,3 @@
+## 2024-05-18 - Array filtering inside sort comparator creates O(N²) bottleneck
+**Learning:** Found an anti-pattern in `Dashboard.tsx` where `.filter()` was being called inside a `.sort()` comparator loop to count pending items. Since `.sort()` executes the comparator multiple times for each element comparison, running O(N) operations inside it results in an O(N²) time complexity bottleneck, severely impacting performance for large arrays.
+**Action:** Always precompute derived statistics (like array filtering counts) into a Map or dictionary before running the `.sort()` operation, ensuring the comparator only performs O(1) lookups.
