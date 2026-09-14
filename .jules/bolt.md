@@ -1,0 +1,3 @@
+## 2024-09-14 - Optimize O(N^2) sorting in Dashboard.tsx
+**Learning:** Found a classic performance anti-pattern in `src/pages/Dashboard.tsx` where `.filter()` is being called repeatedly *inside* a `.sort()` comparator to count pending items. This turns what should be an O(N log N) sorting operation into an O(N^2) operation, potentially causing main thread blocking if the number of events (and items within them) grows large.
+**Action:** Instead of re-filtering arrays inside `.sort()`, pre-calculate the derived counts into a fast O(1) lookup dictionary (or Map) before running `.sort()`, keeping the time complexity at O(N log N).
