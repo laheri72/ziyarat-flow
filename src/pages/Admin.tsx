@@ -80,6 +80,15 @@ export default function Admin() {
   const [beneficiaryCap, setBeneficiaryCap] = useState<string>("");
   const [selectedStudentForUnassign, setSelectedStudentForUnassign] = useState<string>("");
   const [whatsappTemplate, setWhatsappTemplate] = useState("");
+
+  // ⚡ Bolt: Precalculate lengths to avoid O(N) filtering inside render tree on every keystroke/update
+  const availableInMumbaiCount = useMemo(() =>
+    availableStudents.filter(s => s.available_in_mumbai).length,
+  [availableStudents]);
+
+  const notAvailableInMumbaiCount = useMemo(() =>
+    availableStudents.filter(s => !s.available_in_mumbai).length,
+  [availableStudents]);
   const [emailSubject, setEmailSubject] = useState("");
   const [emailBody, setEmailBody] = useState("");
   const [savingTemplates, setSavingTemplates] = useState(false);
@@ -1950,7 +1959,7 @@ export default function Admin() {
                       onClick={selectAllAvailable}
                       className="text-green-600 border-green-600 hover:bg-green-50 dark:hover:bg-green-950"
                     >
-                      Select All Available ({availableStudents.filter(s => s.available_in_mumbai).length})
+                      Select All Available ({availableInMumbaiCount})
                     </Button>
                     <Button size="sm" variant="outline" onClick={selectAll}>
                       Select All ({availableStudents.length})
@@ -1984,12 +1993,12 @@ export default function Admin() {
                 {/* Students List */}
                 <div className="space-y-2 max-h-96 overflow-y-auto mb-4">
                   {/* Available Students - Green Section */}
-                  {availableStudents.filter(s => s.available_in_mumbai).length > 0 && (
+                  {availableInMumbaiCount > 0 && (
                     <div className="mb-4">
                       <div className="flex items-center gap-2 mb-2 sticky top-0 bg-background py-2">
                         <div className="w-3 h-3 rounded-full bg-green-500"></div>
                         <h4 className="font-medium text-sm text-green-600 dark:text-green-400">
-                          Available in Mumbai ({availableStudents.filter(s => s.available_in_mumbai).length})
+                          Available in Mumbai ({availableInMumbaiCount})
                         </h4>
                       </div>
                       {availableStudents
@@ -2020,12 +2029,12 @@ export default function Admin() {
                   )}
 
                   {/* Other Students */}
-                  {availableStudents.filter(s => !s.available_in_mumbai).length > 0 && (
+                  {notAvailableInMumbaiCount > 0 && (
                     <div>
                       <div className="flex items-center gap-2 mb-2 sticky top-0 bg-background py-2">
                         <div className="w-3 h-3 rounded-full bg-gray-400"></div>
                         <h4 className="font-medium text-sm text-muted-foreground">
-                          Other Students ({availableStudents.filter(s => !s.available_in_mumbai).length})
+                          Other Students ({notAvailableInMumbaiCount})
                         </h4>
                       </div>
                       {availableStudents
