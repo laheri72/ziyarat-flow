@@ -1,0 +1,3 @@
+## 2024-06-25 - Extracted O(N) array filtering out of sort callbacks and JSX render loop
+**Learning:** Performance bottlenecks can occur when running expensive array operations like `.filter().length` inside `.sort()` comparators resulting in O(N^2) complexity, and repeatedly running identical inline `.filter()` operations inside React JSX templates forces redundant recalculation on every render.
+**Action:** When sorting mapped or grouped data, pre-compute derived values into an O(1) lookup dictionary *before* the `.sort()` operation. For repeated data derivations in JSX where `useMemo` isn't feasible (e.g., conditional blocks), use local variables or an IIFE to cache the result for that specific render cycle.

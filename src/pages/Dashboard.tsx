@@ -488,11 +488,18 @@ export default function Dashboard() {
     //    - Then sorted by highest pending count descending
     // 2. Events with 0 pending (100% completed) come after
     //    - Active currentEvent first, then alphabetical
+
+    // ⚡ Bolt: Precompute pending counts to avoid O(N) filtering inside the O(N log N) sort comparator
+    const pendingCounts = Object.fromEntries(
+      Object.entries(grouped).map(([tag, items]) => [
+        tag,
+        items.filter((item) => item.status === "pending").length,
+      ])
+    );
+
     const tags = Object.keys(grouped).sort((a, b) => {
-      const aItems = grouped[a];
-      const bItems = grouped[b];
-      const aPending = aItems.filter((item) => item.status === "pending").length;
-      const bPending = bItems.filter((item) => item.status === "pending").length;
+      const aPending = pendingCounts[a] || 0;
+      const bPending = pendingCounts[b] || 0;
 
       const aHasPending = aPending > 0;
       const bHasPending = bPending > 0;
