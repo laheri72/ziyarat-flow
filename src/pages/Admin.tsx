@@ -1898,7 +1898,12 @@ export default function Admin() {
           {/* Actions Tab */}
           <TabsContent value="actions" className="space-y-6">
             {/* Manual Assignment Modal/Section */}
-            {showManualAssign && (
+            {showManualAssign && (() => {
+              // ⚡ Bolt: Memoize filtered arrays to avoid O(N) filtering inside the render loop
+              const availableInMumbaiStudents = availableStudents.filter(s => s.available_in_mumbai);
+              const unavailableInMumbaiStudents = availableStudents.filter(s => !s.available_in_mumbai);
+
+              return (
               <div className="card-elevated p-6 border-2 border-primary">
                 <div className="flex items-center justify-between mb-4">
                   <div>
@@ -1950,7 +1955,7 @@ export default function Admin() {
                       onClick={selectAllAvailable}
                       className="text-green-600 border-green-600 hover:bg-green-50 dark:hover:bg-green-950"
                     >
-                      Select All Available ({availableStudents.filter(s => s.available_in_mumbai).length})
+                      Select All Available ({availableInMumbaiStudents.length})
                     </Button>
                     <Button size="sm" variant="outline" onClick={selectAll}>
                       Select All ({availableStudents.length})
@@ -1984,16 +1989,15 @@ export default function Admin() {
                 {/* Students List */}
                 <div className="space-y-2 max-h-96 overflow-y-auto mb-4">
                   {/* Available Students - Green Section */}
-                  {availableStudents.filter(s => s.available_in_mumbai).length > 0 && (
+                  {availableInMumbaiStudents.length > 0 && (
                     <div className="mb-4">
                       <div className="flex items-center gap-2 mb-2 sticky top-0 bg-background py-2">
                         <div className="w-3 h-3 rounded-full bg-green-500"></div>
                         <h4 className="font-medium text-sm text-green-600 dark:text-green-400">
-                          Available in Mumbai ({availableStudents.filter(s => s.available_in_mumbai).length})
+                          Available in Mumbai ({availableInMumbaiStudents.length})
                         </h4>
                       </div>
-                      {availableStudents
-                        .filter(s => s.available_in_mumbai)
+                      {availableInMumbaiStudents
                         .map((student) => (
                           <label
                             key={student.tr_number}
@@ -2020,16 +2024,15 @@ export default function Admin() {
                   )}
 
                   {/* Other Students */}
-                  {availableStudents.filter(s => !s.available_in_mumbai).length > 0 && (
+                  {unavailableInMumbaiStudents.length > 0 && (
                     <div>
                       <div className="flex items-center gap-2 mb-2 sticky top-0 bg-background py-2">
                         <div className="w-3 h-3 rounded-full bg-gray-400"></div>
                         <h4 className="font-medium text-sm text-muted-foreground">
-                          Other Students ({availableStudents.filter(s => !s.available_in_mumbai).length})
+                          Other Students ({unavailableInMumbaiStudents.length})
                         </h4>
                       </div>
-                      {availableStudents
-                        .filter(s => !s.available_in_mumbai)
+                      {unavailableInMumbaiStudents
                         .map((student) => (
                           <label
                             key={student.tr_number}
@@ -2078,7 +2081,8 @@ export default function Admin() {
                   </Button>
                 </div>
               </div>
-            )}
+            );
+            })()}
 
             <div className="grid md:grid-cols-3 gap-6">
               {/* Manual Assign Card */}
