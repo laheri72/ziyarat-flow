@@ -80,17 +80,36 @@ export default function Dashboard() {
     checkActiveUnassignmentRequest(s.tr_number);
   }, [navigate]);
 
-  const currentEventAssignments = currentEvent
-    ? assignments.filter((a) => a.event_tag === currentEvent)
-    : [];
-  const currentEventTotal = currentEventAssignments.length;
-  const currentEventCompleted = currentEventAssignments.filter(
-    (a) => a.status === "completed"
-  ).length;
-  const currentEventPending = currentEventTotal - currentEventCompleted;
-  const isCurrentEventFullyCompleted = currentEventTotal > 0 && currentEventPending === 0;
-  const canRequestMoreForCurrentEvent =
-    !!currentEvent && availableInMumbai && (currentEventTotal === 0 || isCurrentEventFullyCompleted);
+  // ⚡ Bolt: Memoize the derivations of currentEvent to avoid redundant filtering on every render (e.g. while typing in search)
+  const {
+    currentEventAssignments,
+    currentEventTotal,
+    currentEventCompleted,
+    currentEventPending,
+    isCurrentEventFullyCompleted,
+    canRequestMoreForCurrentEvent,
+  } = useMemo(() => {
+    const currentAssignments = currentEvent
+      ? assignments.filter((a) => a.event_tag === currentEvent)
+      : [];
+    const total = currentAssignments.length;
+    let completed = 0;
+    for (const a of currentAssignments) {
+      if (a.status === "completed") completed++;
+    }
+    const pending = total - completed;
+    const fullyCompleted = total > 0 && pending === 0;
+    const canRequestMore = !!currentEvent && availableInMumbai && (total === 0 || fullyCompleted);
+
+    return {
+      currentEventAssignments: currentAssignments,
+      currentEventTotal: total,
+      currentEventCompleted: completed,
+      currentEventPending: pending,
+      isCurrentEventFullyCompleted: fullyCompleted,
+      canRequestMoreForCurrentEvent: canRequestMore,
+    };
+  }, [currentEvent, assignments, availableInMumbai]);
 
   useEffect(() => {
     // Only show this tip on first-time / zero-assignments state (per session+event).
@@ -231,12 +250,10 @@ export default function Dashboard() {
       return;
     }
 
-    const pendingForCurrentEvent = assignments.filter(
-      (a) => a.event_tag === currentEvent && a.status === "pending"
-    ).length;
-    if (pendingForCurrentEvent > 0) {
+    // ⚡ Bolt: Use the memoized currentEventPending value to avoid redundant `.filter().length`
+    if (currentEventPending > 0) {
       toast.error(
-        `You still have ${pendingForCurrentEvent} pending name(s) for "${currentEvent}". Complete them first.`
+        `You still have ${currentEventPending} pending name(s) for "${currentEvent}". Complete them first.`
       );
       return;
     }
@@ -453,7 +470,7 @@ export default function Dashboard() {
     }
   };
 
-  const { filteredAssignments, groupedAssignments, groupedEventTags } = useMemo(() => {
+  const { filteredAssignments, groupedAssignments, groupedEventTags, groupStats } = useMemo(() => {
     const query = searchQuery ? searchQuery.toLowerCase() : "";
 
     const filtered = assignments.filter((a) => {
@@ -472,9 +489,29 @@ export default function Dashboard() {
       return acc;
     }, {} as Record<string, Assignment[]>);
 
+    // ⚡ Bolt: Precompute group stats to avoid O(N^2) `.filter().length` in the `.sort()` comparator below
+    // and to avoid redundant calculation on every render in the UI loop.
+    const stats: Record<string, { pending: number; completed: number; total: number }> = {};
+
     // Sort assignments inside each group: pending first, then completed!
     Object.keys(grouped).forEach((tag) => {
-      grouped[tag].sort((a, b) => {
+      const items = grouped[tag];
+
+      let pendingCount = 0;
+      let completedCount = 0;
+
+      for (const item of items) {
+        if (item.status === "pending") pendingCount++;
+        else completedCount++;
+      }
+
+      stats[tag] = {
+        pending: pendingCount,
+        completed: completedCount,
+        total: items.length
+      };
+
+      items.sort((a, b) => {
         if (a.status !== b.status) {
           return a.status === "pending" ? -1 : 1;
         }
@@ -489,10 +526,8 @@ export default function Dashboard() {
     // 2. Events with 0 pending (100% completed) come after
     //    - Active currentEvent first, then alphabetical
     const tags = Object.keys(grouped).sort((a, b) => {
-      const aItems = grouped[a];
-      const bItems = grouped[b];
-      const aPending = aItems.filter((item) => item.status === "pending").length;
-      const bPending = bItems.filter((item) => item.status === "pending").length;
+      const aPending = stats[a].pending;
+      const bPending = stats[b].pending;
 
       const aHasPending = aPending > 0;
       const bHasPending = bPending > 0;
@@ -520,7 +555,7 @@ export default function Dashboard() {
       return a.localeCompare(b);
     });
 
-    return { filteredAssignments: filtered, groupedAssignments: grouped, groupedEventTags: tags };
+    return { filteredAssignments: filtered, groupedAssignments: grouped, groupedEventTags: tags, groupStats: stats };
   }, [assignments, searchQuery, currentEvent]);
 
   const assignmentCardTitle = isCurrentEventFullyCompleted
@@ -997,9 +1032,13 @@ export default function Dashboard() {
             <div className="space-y-4">
               {groupedEventTags.map((tag) => {
                 const items = groupedAssignments[tag];
-                const completedInGroup = items.filter((a) => a.status === "completed").length;
-                const totalInGroup = items.length;
-                const pendingInGroup = totalInGroup - completedInGroup;
+
+                // ⚡ Bolt: Use precomputed stats from the useMemo hook to avoid recalculating on every render cycle
+                const stats = groupStats[tag];
+                const completedInGroup = stats.completed;
+                const totalInGroup = stats.total;
+                const pendingInGroup = stats.pending;
+
                 const isFullyCompleted = totalInGroup > 0 && pendingInGroup === 0;
                 const isCurrent = tag === currentEvent;
                 const groupProgress = totalInGroup > 0 ? Math.round((completedInGroup / totalInGroup) * 100) : 0;
