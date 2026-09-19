@@ -1,0 +1,3 @@
+## 2025-03-02 - [Resolved O(N²) sorting bottleneck in Dashboard]
+**Learning:** Found an inline `.filter().length` call inside an `Array.prototype.sort()` comparator function for grouped tags in `src/pages/Dashboard.tsx`. Because `sort` can compare elements multiple times (O(N log N)), performing an O(N) array iteration inside the comparator leads to severe O(N²) or even O(N² log N) degradation as the dataset grows.
+**Action:** Always precalculate derived statistics (like counts) into a lookup dictionary (e.g. `Record<string, number>`) before sorting arrays, reducing the time complexity to O(N) + O(N log N).
