@@ -303,36 +303,46 @@ export default function Admin() {
         return;
       }
 
-      // 2. Fetch ALL assignments with pagination (no 1000 row truncation)
+      // ⚡ Bolt: Fixed N+1 query bottleneck. Instead of fetching the entire assignments table,
+      // we chunk active student TR numbers and fetch related assignments using .in().
       const assignmentStats = new Map<string, { assigned: number; completed: number }>();
-      let assignmentOffset = 0;
 
-      while (true) {
-        const { data: assignments, error: assignmentError } = await supabase
-          .from("assignments")
-          .select("student_tr_number, status")
-          .order("id")
-          .range(assignmentOffset, assignmentOffset + batchSize - 1);
+      const trNumbers = allStudents.map((s) => s.tr_number).filter(Boolean);
+      const CHUNK_SIZE = 50;
 
-        if (assignmentError) throw assignmentError;
-        if (!assignments || assignments.length === 0) break;
+      for (let i = 0; i < trNumbers.length; i += CHUNK_SIZE) {
+        const chunk = trNumbers.slice(i, i + CHUNK_SIZE);
+        let assignmentOffset = 0;
+        const assignmentBatchSize = 1000;
 
-        for (const assignment of assignments) {
-          if (!assignment.student_tr_number) continue;
-          const normalizedTr = assignment.student_tr_number.trim();
+        while (true) {
+          const { data: assignments, error: assignmentError } = await supabase
+            .from("assignments")
+            .select("student_tr_number, status")
+            .in("student_tr_number", chunk)
+            .order("id")
+            .range(assignmentOffset, assignmentOffset + assignmentBatchSize - 1);
 
-          let stats = assignmentStats.get(normalizedTr);
-          if (!stats) {
-            stats = { assigned: 0, completed: 0 };
-            assignmentStats.set(normalizedTr, stats);
+          if (assignmentError) throw assignmentError;
+          if (!assignments || assignments.length === 0) break;
+
+          for (const assignment of assignments) {
+            if (!assignment.student_tr_number) continue;
+            const normalizedTr = assignment.student_tr_number.trim();
+
+            let stats = assignmentStats.get(normalizedTr);
+            if (!stats) {
+              stats = { assigned: 0, completed: 0 };
+              assignmentStats.set(normalizedTr, stats);
+            }
+            stats.assigned += 1;
+            if (assignment.status === "completed") {
+              stats.completed += 1;
+            }
           }
-          stats.assigned += 1;
-          if (assignment.status === "completed") {
-            stats.completed += 1;
-          }
+
+          assignmentOffset += assignmentBatchSize;
         }
-
-        assignmentOffset += batchSize;
       }
 
       // 3. Map students with their exact stats
